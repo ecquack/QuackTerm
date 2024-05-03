@@ -83,7 +83,7 @@ The keyboard map is based on the key codes transmitted by the PuTTY program. Not
 
 The following keys produce the escape or control sequences shown:
 
-## #Control keys
+### Control keys
 
 Control-@	ASCII code 0 (NULL)
 Control-[	ASCII code 27, 0x1B (ESCAPE)
@@ -94,7 +94,7 @@ Control-_	ASCII code 31, 0x1F
 Control-?	ASCII code 127, 0x7F (DELETE)
 Control-BS	(ctrl-backspace) ASCII code 127, 0x7F (DELETE)
 
-## #Editing Keys
+### Editing Keys
 
 Up-arrow	ESC [ A
 Down-arrow	ESC [ B
@@ -108,7 +108,7 @@ End		ESC [ 4 ~
 Page Up	ESC [ 5 ~
 Page Down	ESC [ 6 ~
 
-## #Function Keys
+### Function Keys
 
 F1		ESC O P
 F2		ESC O Q
@@ -122,7 +122,8 @@ F9		ESC [ 2 0 ~
 F10		ESC [ 2 1 ~
 F11		ESC [ 2 3 ~
 F12		ESC [ 2 4 ~
-#Special Keys 
+
+## #Special Keys 
 
 The following key sequences are non-standard but they do not conflict with GNU xterm's function key definitions.
 Pause/Break		ESC [ 4 0 ~
@@ -131,7 +132,7 @@ Windows		ESC [ 4 2 ~
 Menu			ESC [ 4 3 ~
 Sleep			ESC [ 4 4 ~
 
-## #Modifier Keys
+### Modifier Keys
 
 When the modifier keys (shift, control, and alt) are used in combination with the function,  editing, and special keys a second modifier parameter is sent which tells the host what combination of modifier keys was used.
 
@@ -147,7 +148,7 @@ The modifier parameters are:
 
 For example, if you were to press the F7 key with a shift key held down, Quackterm would send the string ESC [ 1 8 ; 2 ~ to the host. If you were to press control left-arrow the string would be ESC [ 1 ; 3 D. If you were to press shift-F1 the string would be ESC [ 1 ; 2 P.
 
-## #System Keys
+### System Keys
 
 A few keys do not send codes to the host system. They only change the operating mode of the terminal.
     • Shift-scroll_lock toggles the local echo option on and off. This is primarily useful for debugging since it echoes control and escape codes as well as printable characters.
@@ -160,7 +161,7 @@ A few keys do not send codes to the host system. They only change the operating 
     • ALT-numlock sets the keyboard typematic rate to the maximum speed.
     • Shift-pause/break resets the terminal to its default power up state. 
 
-## #Video Modes
+### Video Modes
 
 The terminal supports 8 video modes. They are:
 Mode 0 (120x67)
@@ -172,9 +173,10 @@ Mode 5 (120x25)
 Mode 6 (80x50)
 Mode 7 (80x25)
 
-## #In-Band Keys
+### In-Band Keys
 
-A few key sequences are sent from the PS/2 keyboard processor to the terminal processor but are never forwarded to the host. These sequences are preceded by hex character 0x9E and followed by a single character. 
+A few key sequences are sent from the PS/2 keyboard processor to the terminal processor but are never forwarded to the host. These sequences are preceded by hex character 0x9E and followed by a single character.
+
     • 0x9E 0x9E (symbol 0x9E is forwarded to the host)
     • 0x9E 's' (lower case s)
     • 0x9E 'S' (capital S)
@@ -184,6 +186,7 @@ A few key sequences are sent from the PS/2 keyboard processor to the terminal pr
     • 0x9E "$" (dollar sign)
     • 0x9E 0xDE (alt upper case S with high bit set)
     • 0x9E 0xA4 (alt dollar sign with high bit set)
+
 They are used to control special features of the terminal.
 
 ## Appendix B: Control and Escape sequences
@@ -191,6 +194,8 @@ They are used to control special features of the terminal.
 The supported command sequences are a superset of those supported by PuTTY, HyperTerminal, xterm, and ANSI.SYS. There are many obscure ANSI and VT100 codes that are not supported. If your favorite code is missing just send me an email and I may include it in a future version.
 
 The following CSI escape sequences are supported (ESC followed by an open bracket):
+
+```
 
 ESC [ n @	insert n characters on the current line
 ESC [ A		move up one line.
@@ -244,7 +249,11 @@ ESC [ ? 12 l	underline cursor mode (default)
 ESC [ ? 25 h	makes the cursor visible
 ESC [ ? 25 l 	makes the cursor invisible
 
+```
+
 The following regular escape sequences are supported (no open bracket):
+
+```
 
 ESC 7		saves the current cursor position and attributes (non-ANSI VT100 code)
 ESC 8		restores the previously saved cursor position and attributes (non-ANSI VT100 code)
@@ -262,9 +271,9 @@ ESC ( e		resets to video mode 4 (120x50) [not standard ANSI]
 ESC ( f		resets to video mode 5 (120x25) [not standard ANSI]
 ESC ( g		resets to video mode 6 (80x50) [not standard ANSI]
 ESC ( h		resets to video mode 7 (80x25) [not standard ANSI]
-
+```
 The following control characters are supported:
-
+```
 Control-G	flashes the screen (bell)
 Control-H	backspace- moves the cursor to the left
 Control-I	nondestructive move to the next tab stop, a multiple of 8 characters
@@ -272,26 +281,32 @@ Control-J	line feed, advances to the next line at the same column
 Control-L	form feed. clears the screen and moves the cursor to the upper left
 Control-M	carriage return, moves to the first column of the current line
 Control-?	Control question mark is ASCII code 127 (0x7F) which performs a destructive backspace, erasing the character preceding the cursor and moving to the left. This code is sometimes called RUBOUT or DELETE and can also be generated by pressing shift-backspace.
-
-## #VT100 Graphics
+```
+## VT100 Graphics
 
 The following graphics characters replace some of the lower case letters and symbols when in VT100 graphics mode. 
-
+```
 a▒  f° g±   j┘  k┐  l┌  m└  n┼   q─   t├   u┤   v┴   w┬   x│   y≤   z≥   {π   |≠   }£   ~·   `◆
-
+```
 The line drawing characters in particular are used by a number of terminfo/ncurses aware applications under linux.
 
 ## Appendix C: VHDL Details
 
-## #Microprocessors
+### Microprocessors
 
 The design uses two PicoBlaze-6 microprocessors. The main processor interprets the ANSI terminal commands and manages the character display memory and video mode. The secondary processor converts PS/2 scan codes from the keyboard into ASCII characters.
-Block Memory
+
+### Block Memory
+
 The design uses thirteen Xilinx 18kbit block memories organized as 2Kx8, 1Kx18, or 16Kx1. 
 The design uses 8Kx9 bits for the character display (120x67=8038, with 8 bits for the symbol plus one bit to select the alternate font) and 8Kx9 bits for the character attributes (16 foreground and 16 background colors for each character plus an underline mode bit using the parity bit), for a total of 8 block RAMs. The Xilinx block RAMs have built in parity bits which we're using to select underline mode and the alternate font. These memories are dual ported. One side is read by the VGA process to generate the display. The other side can be read and written by the main microprocessor.
+
 The design uses two block RAMS (arranged as 1Kx18 bits wide) for the main microprocessor's program ROM, giving us a program size of 2048 instruction words. The PicoBlaze-6 has an instruction word size of 18 bits. This RAM is read only, although there is a JTAG port defined which allows you to upload new firmware using the Xilinx "jtagload" utility without requiring a complete rebuild of the FPGA. "jtagload" is included with the PicoBlaze-6 distribution. You can use it with the Pipistrello's built in programming port; there is no need for a dedicated JTAG interface.
+
 The design uses a single block RAM for the secondary (keyboard) microprocessor's program ROM, giving a program size of 1024 instruction words. You cannot use the JTAG utility to program the keyboard processor. You must re-synthesize the design if you make changes to the keyboard firmware.
+
 The design uses two block memories to store the character fonts. This ROM is arranged as 32Kx1 and is read only. It stores 512 characters in an 8x8 pixel matrix. The block RAM's address lines are divided into three sections: there are 3 bits which select the pixel row, 8 bits which select the character, and 3 bits which select the pixel column  The row is selected by the 3 most significant bits. The column is selected by the 3 least significant bits. The character address uses the middle 8 bits. Here is the VHDL statement that calculates the font address:
+
 >		romADDR <=	ramCHAR(8) & 
 >				r.vCounter(3 downto 1) &
 >				 ramCHAR(7 downto 0) & 
