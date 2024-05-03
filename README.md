@@ -16,26 +16,26 @@ QuackTerm is an open source ANSI terminal with HDMI output and PS/2 keyboard inp
 
 QuackTerm is a VHDL IP core which you can adapt and use in your own designs.  It was designed for the Saanlima Electronics Pipistrello evaluation board but it uses only a small fraction of the Xilinx Spartan-6 LX45. It does not require any external memory. It should be easily ported to any Spartan-6 board. Drop me a line if you need assistance porting it.  It is not easily portable to a Spartan-3 or an Altera part because it uses the Xilinx Picoblaze-6 microprocessor IP core which is built for the LUT size of a Spartan 6, but it should work on a Xilinx Virtex-6 or 7 (or a Zynq) if you're lucky enough to have one.
 
-##Video Display
+## Video Display
 
 QuackTerm generates a display using HDMI 1080p30 (1920x1080 progressive scan 30 FPS) which can display up to 67 lines of characters with 120 characters per line (120x67). The character resolution can also be set to 80x50, 80x25, and a few other resolutions. You can change the pixel clock from 75mhz to 150mhz to generate 1080p60 (the cursor will blink faster), which works for me but which doesn't quite meet the FPGA timing constraints for a chip with a -3 speed rating so use it at your own risk. I've thought about implementing support for 1080i60 (interlaced) but so far what I have works fine on every HDMI display I have tried it with. It does not use HDCP or any advanced features of HDMI- it basically acts as a DVI port. I plan to add HDMI audio support in version 2 for the terminal bell; right now it just flashes the screen.  The HDMI code is based on the work of Mike Field (hamster@snap.net.nz), so he should get all the credit for the 1080p display unless there's something wrong with it in which case it's probably due to my modifications.
 The terminal supports  sixteen foreground and sixteen background colors for each character. These are used to implement reverse video and boldface. The palette is the same as the original IBM VGA default palette. The terminal has a hardware underline cursor which blinks every 32 video frames. The hardware supports underlining but does not directly support blinking text.
 
-##Keyboard
+## Keyboard
 
 The terminal accepts user input from a PS/2 keyboard which by default is attached using the main PS/2 port on a Papilio "Arcade Megawing" board from the Gadget Factory. You can edit the UCF file to use a PS/2 port on the PMOD connector (like the Saanlima Oberon Wing), or you could just wire up a mini-DIN connector yourself and attach it to the board (you'll need +5 volts, ground, clock, data, and two 270 ohm current limiting resistors in series with the clock and data). The LED lights (CAPS LOCK, NUMLOCK, and SCROLL LOCK) reflect the appropriate states.
 If you need local echo for some reason, press shift-scroll_lock, which toggles between normal and local echo mode.
 
-##Serial Communications
+## Serial Communications
 
 QuackTerm communicates over a UART which defaults to 115200 baud (set in hardware). This port is connected to the USB serial port converter on the Pipistrello board but it doesn't have to be. You could easily wire up a MAX232 chip and a DB9 connector to get a true RS-232 port.  It is a two wire interface. There is no hardware handshaking, but the terminal can keep up with the full baud rate under ordinary conditions as long as you don't send a multiple clear screen, delete line, or insert line commands in a row. 
 QuackTerm includes a small soft core microprocessor (a PicoBlaze-6 with 1K word of program ROM and 64 bytes of RAM) running a program which converts PS/2 scan codes from the keyboard into ASCII characters. A second microprocessor with 2K ROM processes ANSI escape codes and manages the actual terminal emulation. The programs are written in assembly language.
 
-##Character Display
+## Character Display
 
 QuackTerm uses an 8x8 pixel font (scaled up in hardware) which contains an ISO 8859-1 compatible font which is based on Windows codepage 1252 and contains the standard VT100 graphics symbols in the unused 32 lower characters. It thus contains common line drawing characters and alphabetic symbols with diacritics necessary for representing many (but not all) European languages. If you're using QuackTerm and would prefer a different character set please send me an email and I can help you out. Alternate ROM files are supplied which contains codepage 437 (the original U.S. market IBM PC) and codepage 850  (standard on IBM PCs sold in Europe) fonts but you'll have to rebuild the project to use them. The font currently only takes one Xilinx block memory (2K bytes of ROM).
 
-##ANSI Emulation
+## ANSI Emulation
 
 QuackTerm supports a working subset of the ANSI 3.64 (ECMA-48) terminal specification which is available as a free download from ECMA. The control codes it accepts are detailed in Appendix B. The goal was to approximate the behavior of a typical ANSI emulation well enough to use the terminal with linux, so it's loosely based on the control codes found in PuTTY, GNU xterm, Windows HyperTerminal, and the Microsoft "ANSI.SYS" console in Windows 10.
 Linux Support
@@ -67,7 +67,7 @@ The following linux programs have been tested and work correctly under Ubuntu 16
     • bastet (a game similar to Tetris)
     • AlienWave (a game in the Space Invaders family)
 
-##TermInfo
+## TermInfo
 
 The configuration provided in the xterm  terminfo file does not precisely match the capabilities of QuackTerm although it works fine with all the programs I have tested.  You can also use the ansi terminfo file, although it does not support the function keys and graphics characters. If you have problems with an ncurses based linux application you may wish to use the provided quackterm.terminfo file instead. To install it for the current user you use the commands:
 	tic quackterm.terminfo
@@ -77,13 +77,13 @@ Once you have installed it, reissue the the agetty command:
 sudo setsid agetty -L ttyUSB1 115200 quack
 If you're not seeing color coded directory listings from ls you may have to set the LS_COLORS environment variable manually. An example LS_COLORS.quack file is included. 
 
-##Appendix A: Keyboard
+## Appendix A: Keyboard
 
 The keyboard map is based on the key codes transmitted by the PuTTY program. Note that combining a regular key with the alt key will set the high bit of the ASCII character, generating codes from 128-256. The firmware assumes a U.S. English keyboard because that's what we use here in British Columbia. Send me and email if you need help modifying the code to support a different keyboard.
 
 The following keys produce the escape or control sequences shown:
 
-###Control keys
+## #Control keys
 
 Control-@	ASCII code 0 (NULL)
 Control-[	ASCII code 27, 0x1B (ESCAPE)
@@ -94,7 +94,7 @@ Control-_	ASCII code 31, 0x1F
 Control-?	ASCII code 127, 0x7F (DELETE)
 Control-BS	(ctrl-backspace) ASCII code 127, 0x7F (DELETE)
 
-###Editing Keys
+## #Editing Keys
 
 Up-arrow	ESC [ A
 Down-arrow	ESC [ B
@@ -108,7 +108,7 @@ End		ESC [ 4 ~
 Page Up	ESC [ 5 ~
 Page Down	ESC [ 6 ~
 
-###Function Keys
+## #Function Keys
 
 F1		ESC O P
 F2		ESC O Q
@@ -131,7 +131,7 @@ Windows		ESC [ 4 2 ~
 Menu			ESC [ 4 3 ~
 Sleep			ESC [ 4 4 ~
 
-###Modifier Keys
+## #Modifier Keys
 
 When the modifier keys (shift, control, and alt) are used in combination with the function,  editing, and special keys a second modifier parameter is sent which tells the host what combination of modifier keys was used.
 
@@ -147,7 +147,7 @@ The modifier parameters are:
 
 For example, if you were to press the F7 key with a shift key held down, Quackterm would send the string ESC [ 1 8 ; 2 ~ to the host. If you were to press control left-arrow the string would be ESC [ 1 ; 3 D. If you were to press shift-F1 the string would be ESC [ 1 ; 2 P.
 
-###System Keys
+## #System Keys
 
 A few keys do not send codes to the host system. They only change the operating mode of the terminal.
     • Shift-scroll_lock toggles the local echo option on and off. This is primarily useful for debugging since it echoes control and escape codes as well as printable characters.
@@ -160,7 +160,7 @@ A few keys do not send codes to the host system. They only change the operating 
     • ALT-numlock sets the keyboard typematic rate to the maximum speed.
     • Shift-pause/break resets the terminal to its default power up state. 
 
-###Video Modes
+## #Video Modes
 
 The terminal supports 8 video modes. They are:
 Mode 0 (120x67)
@@ -172,7 +172,7 @@ Mode 5 (120x25)
 Mode 6 (80x50)
 Mode 7 (80x25)
 
-###In-Band Keys
+## #In-Band Keys
 
 A few key sequences are sent from the PS/2 keyboard processor to the terminal processor but are never forwarded to the host. These sequences are preceded by hex character 0x9E and followed by a single character. 
     • 0x9E 0x9E (symbol 0x9E is forwarded to the host)
@@ -186,7 +186,7 @@ A few key sequences are sent from the PS/2 keyboard processor to the terminal pr
     • 0x9E 0xA4 (alt dollar sign with high bit set)
 They are used to control special features of the terminal.
 
-##Appendix B: Control and Escape sequences
+## Appendix B: Control and Escape sequences
 
 The supported command sequences are a superset of those supported by PuTTY, HyperTerminal, xterm, and ANSI.SYS. There are many obscure ANSI and VT100 codes that are not supported. If your favorite code is missing just send me an email and I may include it in a future version.
 
@@ -273,7 +273,7 @@ Control-L	form feed. clears the screen and moves the cursor to the upper left
 Control-M	carriage return, moves to the first column of the current line
 Control-?	Control question mark is ASCII code 127 (0x7F) which performs a destructive backspace, erasing the character preceding the cursor and moving to the left. This code is sometimes called RUBOUT or DELETE and can also be generated by pressing shift-backspace.
 
-###VT100 Graphics
+## #VT100 Graphics
 
 The following graphics characters replace some of the lower case letters and symbols when in VT100 graphics mode. 
 
@@ -281,9 +281,9 @@ a▒  f° g±   j┘  k┐  l┌  m└  n┼   q─   t├   u┤   v┴   w┬ 
 
 The line drawing characters in particular are used by a number of terminfo/ncurses aware applications under linux.
 
-##Appendix C: VHDL Details
+## Appendix C: VHDL Details
 
-###Microprocessors
+## #Microprocessors
 
 The design uses two PicoBlaze-6 microprocessors. The main processor interprets the ANSI terminal commands and manages the character display memory and video mode. The secondary processor converts PS/2 scan codes from the keyboard into ASCII characters.
 Block Memory
