@@ -343,7 +343,7 @@ Control-?	Control question mark is ASCII code 127 (0x7F) which performs a destru
 
 The following graphics characters replace some of the lower case letters and symbols when in VT100 graphics mode. 
 ```
-a▒  f° g±   j┘  k┐  l┌  m└  n┼   q─   t├   u┤   v┴   w┬   x│   y≤   z≥   {π   |≠   }£   ~·   `◆
+a▒  f° g± j┘ k┐ l┌ m└ n┼ q─ t├ u┤ v┴ w┬ x│ y≤ z≥ {π |≠ }£ ~· `◆
 ```
 The line drawing characters in particular are used by a number of terminfo/ncurses aware applications under linux.
 
