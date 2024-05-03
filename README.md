@@ -294,7 +294,8 @@ ESC [ 24 m	disable underline mode
 ESC [ 25 m	disable blink (clears high bit of background color)
 ESC [ 27 m	disable inverse video (restores foreground and background color)
 ESC [ 28 m	disable hidden mode (restores foreground color)
-ESC [ 30-37 m	set foreground color  (30 black, 31 red, 32 green, 33 yellow, 34 blue, 35 magenta, 36 			cyan, 37 white)
+ESC [ 30-37 m	set foreground color  (30 black, 31 red, 32 green, 33 yellow, 34 blue,
+                35 magenta, 36 			cyan, 37 white)
 ESC [ 39 m	set foreground color to default
 ESC [ 40-47 m	set background color (same sequence as foreground colors)
 ESC [ 49 m 	set background color to default
