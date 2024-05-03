@@ -18,17 +18,26 @@ QuackTerm is a VHDL IP core which you can adapt and use in your own designs.  It
 
 ## Video Display
 
-QuackTerm generates a display using HDMI 1080p30 (1920x1080 progressive scan 30 FPS) which can display up to 67 lines of characters with 120 characters per line (120x67). The character resolution can also be set to 80x50, 80x25, and a few other resolutions. You can change the pixel clock from 75mhz to 150mhz to generate 1080p60 (the cursor will blink faster), which works for me but which doesn't quite meet the FPGA timing constraints for a chip with a -3 speed rating so use it at your own risk. I've thought about implementing support for 1080i60 (interlaced) but so far what I have works fine on every HDMI display I have tried it with. It does not use HDCP or any advanced features of HDMI- it basically acts as a DVI port. I plan to add HDMI audio support in version 2 for the terminal bell; right now it just flashes the screen.  The HDMI code is based on the work of Mike Field (hamster@snap.net.nz), so he should get all the credit for the 1080p display unless there's something wrong with it in which case it's probably due to my modifications.
+QuackTerm generates a display using HDMI 1080p30 (1920x1080 progressive scan 30 FPS) which can display up to 67 lines of characters with 120 characters per line (120x67). The character resolution can also be set to 80x50, 80x25, and a few other resolutions. You can change the pixel clock from 75mhz to 150mhz to generate 1080p60 (the cursor will blink faster), which works for me but which doesn't quite meet the FPGA timing constraints for a chip with a -3 speed rating so use it at your own risk. I've thought about implementing support for 1080i60 (interlaced) but so far what I have works fine on every HDMI display I have tried it with. It does not use HDCP or any advanced features of HDMI- it basically acts as a DVI port.
+
+I had hoped to add HDMI audio support in version 2 for the terminal bell, but I've moved on to other projects. Right now it just flashes the screen.
+
+The HDMI code is based on the work of Mike Field (hamster@snap.net.nz), so he should get all the credit for the 1080p display unless there's something wrong with it in which case it's probably due to my modifications.
+
 The terminal supports  sixteen foreground and sixteen background colors for each character. These are used to implement reverse video and boldface. The palette is the same as the original IBM VGA default palette. The terminal has a hardware underline cursor which blinks every 32 video frames. The hardware supports underlining but does not directly support blinking text.
 
 ## Keyboard
 
-The terminal accepts user input from a PS/2 keyboard which by default is attached using the main PS/2 port on a Papilio "Arcade Megawing" board from the Gadget Factory. You can edit the UCF file to use a PS/2 port on the PMOD connector (like the Saanlima Oberon Wing), or you could just wire up a mini-DIN connector yourself and attach it to the board (you'll need +5 volts, ground, clock, data, and two 270 ohm current limiting resistors in series with the clock and data). The LED lights (CAPS LOCK, NUMLOCK, and SCROLL LOCK) reflect the appropriate states.
+The terminal accepts user input from a PS/2 keyboard which by default is attached using the main PS/2 port on a Papilio "Arcade Megawing" board from the Gadget Factory. You can edit the UCF file to use a PS/2 port on the PMOD connector (like the Saanlima Oberon Wing), or you could just wire up a mini-DIN connector yourself and attach it to the board (you'll need +5 volts, ground, clock, data, and two 270 ohm current limiting resistors in series with the clock and data). 
+
+The LED lights (CAPS LOCK, NUMLOCK, and SCROLL LOCK) reflect the appropriate states.
+
 If you need local echo for some reason, press shift-scroll_lock, which toggles between normal and local echo mode.
 
 ## Serial Communications
 
 QuackTerm communicates over a UART which defaults to 115200 baud (set in hardware). This port is connected to the USB serial port converter on the Pipistrello board but it doesn't have to be. You could easily wire up a MAX232 chip and a DB9 connector to get a true RS-232 port.  It is a two wire interface. There is no hardware handshaking, but the terminal can keep up with the full baud rate under ordinary conditions as long as you don't send a multiple clear screen, delete line, or insert line commands in a row. 
+
 QuackTerm includes a small soft core microprocessor (a PicoBlaze-6 with 1K word of program ROM and 64 bytes of RAM) running a program which converts PS/2 scan codes from the keyboard into ASCII characters. A second microprocessor with 2K ROM processes ANSI escape codes and manages the actual terminal emulation. The programs are written in assembly language.
 
 ## Character Display
@@ -42,16 +51,26 @@ Linux Support
 
 All my linux testing has been under Ubuntu 16.04.2 LTS desktop. If you're running a different distribution your results may vary. 
 
-If you issue the linux command
+If you issue the command
+
+```
+
 sudo setsid agetty -L ttyUSB1 115200 xterm
+
+```
+
 you  should get a login prompt on the terminal. You may have to change the device name from ttyUSB1 if you have other USB serial ports attached. Once you login you should issue the command 
+
+```
 
 	stty cols 120 rows 67
 
+```
+
 to set the screen size. You may also wish to change the locale by issuing the command
-
+```
 	LANG=C
-
+```
 because the default is UTF-8 and QuackTerm does not support unicode. Sorry!
 
 The following linux programs have been tested and work correctly under Ubuntu 16.0.4:
@@ -61,7 +80,7 @@ The following linux programs have been tested and work correctly under Ubuntu 16
     • vim (text editor)
     • xemacs (text editor)
     • nethack (classic game)
-    • mc (midnight commander, a  file manager)
+    • mc (midnight commander, a file manager)
     • sc (spreadsheet calculator)
     • htop (task monitor)
     • bastet (a game similar to Tetris)
