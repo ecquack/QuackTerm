@@ -288,8 +288,8 @@ ESC [ 7 m	set inverse video (swaps foreground and background color).
 ESC [ 8 m	set hidden video (foreground matches background color)
 ESC [ 10 m	sets normal font, ISO 8859-1 Latin-1 (Windows codepage 1252)
 ESC [ 11 m	sets VT100 graphics font, replacing lower case characters with symbols
-ESC [ 12  m	sets IBM PC codepage 437 font
-ESC [ 13 m	sets IBM PC codepage 437 font with graphics characters in place of lower case
+ESC [ 12 m	sets IBM PC codepage 437 font
+ESC [ 13 m	sets IBM PC codepage 437 font with graphics characters, no lower case
 ESC [ 22 m	disable bold (clears high bit of foreground color)
 ESC [ 24 m	disable underline mode
 ESC [ 25 m	disable blink (clears high bit of background color)
