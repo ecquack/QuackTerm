@@ -70,11 +70,22 @@ The following linux programs have been tested and work correctly under Ubuntu 16
 ## TermInfo
 
 The configuration provided in the xterm  terminfo file does not precisely match the capabilities of QuackTerm although it works fine with all the programs I have tested.  You can also use the ansi terminfo file, although it does not support the function keys and graphics characters. If you have problems with an ncurses based linux application you may wish to use the provided quackterm.terminfo file instead. To install it for the current user you use the commands:
+
+```
+
 	tic quackterm.terminfo
 	TERM=quack
 
+```
+
 Once you have installed it, reissue the the agetty command:
+
+```
+
 sudo setsid agetty -L ttyUSB1 115200 quack
+
+```
+
 If you're not seeing color coded directory listings from ls you may have to set the LS_COLORS environment variable manually. An example LS_COLORS.quack file is included. 
 
 ## Appendix A: Keyboard
@@ -85,6 +96,8 @@ The following keys produce the escape or control sequences shown:
 
 ### Control keys
 
+```
+
 Control-@	ASCII code 0 (NULL)
 Control-[	ASCII code 27, 0x1B (ESCAPE)
 Control-\	ASCII code 28, 0x1C
@@ -94,7 +107,11 @@ Control-_	ASCII code 31, 0x1F
 Control-?	ASCII code 127, 0x7F (DELETE)
 Control-BS	(ctrl-backspace) ASCII code 127, 0x7F (DELETE)
 
+```
+
 ### Editing Keys
+
+```
 
 Up-arrow	ESC [ A
 Down-arrow	ESC [ B
@@ -108,7 +125,11 @@ End		ESC [ 4 ~
 Page Up	ESC [ 5 ~
 Page Down	ESC [ 6 ~
 
+```
+
 ### Function Keys
+
+```
 
 F1		ESC O P
 F2		ESC O Q
@@ -123,20 +144,30 @@ F10		ESC [ 2 1 ~
 F11		ESC [ 2 3 ~
 F12		ESC [ 2 4 ~
 
+```
+
 ## #Special Keys 
 
 The following key sequences are non-standard but they do not conflict with GNU xterm's function key definitions.
+
+```
+
 Pause/Break		ESC [ 4 0 ~
 Print Screen/SysRq	ESC [ 4 1 ~
 Windows		ESC [ 4 2 ~
 Menu			ESC [ 4 3 ~
 Sleep			ESC [ 4 4 ~
 
+```
+
 ### Modifier Keys
 
 When the modifier keys (shift, control, and alt) are used in combination with the function,  editing, and special keys a second modifier parameter is sent which tells the host what combination of modifier keys was used.
 
 The modifier parameters are:
+
+```
+
     1. none (no parameter is sent in this case)
     2. shift
     3. control
@@ -145,6 +176,8 @@ The modifier parameters are:
     6. shift-alt
     7. control-alt
     8. control-shift-alt
+
+```
 
 For example, if you were to press the F7 key with a shift key held down, Quackterm would send the string ESC [ 1 8 ; 2 ~ to the host. If you were to press control left-arrow the string would be ESC [ 1 ; 3 D. If you were to press shift-F1 the string would be ESC [ 1 ; 2 P.
 
@@ -164,6 +197,9 @@ A few keys do not send codes to the host system. They only change the operating 
 ### Video Modes
 
 The terminal supports 8 video modes. They are:
+
+```
+
 Mode 0 (120x67)
 Mode 1 (120x33)
 Mode 2 (80x67)
@@ -172,6 +208,8 @@ Mode 4 (120x50)
 Mode 5 (120x25)
 Mode 6 (80x50)
 Mode 7 (80x25)
+
+```
 
 ### In-Band Keys
 
