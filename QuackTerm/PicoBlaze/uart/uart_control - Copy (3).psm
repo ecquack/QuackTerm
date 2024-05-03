@@ -1,0 +1,1092 @@
+;
+; Erik C. Quackenbush erikcq@quackenbush.com
+; this is an ANSI terminal emulation program.
+;
+; arrow keys
+; these are the key codes sent by Xilinx PicoTerm
+; they are not the same as the key sequences sent by HyperTerminal,
+; which sends complete ANSI escape sequences instead of high bit codes.
+
+	CONSTANT backspace_key,	08
+	CONSTANT return_key,	0D
+
+	CONSTANT home_key,	82
+	CONSTANT end_key,	83
+	CONSTANT pgup_key,	84
+	CONSTANT pgdn_key,	85
+	CONSTANT insert_key,	86
+	CONSTANT delete_key,	87
+	CONSTANT left_key,	88
+	CONSTANT right_key,	89
+	CONSTANT down_key,	8A
+	CONSTANT up_key,	8B
+
+	CONSTANT F1_key,	91
+	CONSTANT F2_key,	92
+	CONSTANT F3_key,	93
+	CONSTANT F4_key,	94
+	CONSTANT F5_key,	95
+	CONSTANT F6_key,	96
+	CONSTANT F7_key,	97
+	CONSTANT F8_key,	98
+	CONSTANT F9_key,	99
+	CONSTANT F10_key,	9A
+	CONSTANT F11_key,	9B
+	CONSTANT F12_key,	9C
+
+	CONSTANT ESC_key,	1B
+
+	CONSTANT EXTKEY_END,		69
+	CONSTANT EXTKEY_LEFT,		6B
+	CONSTANT EXTKEY_HOME,		6C
+	CONSTANT EXTKEY_INSERT,		70
+	CONSTANT EXTKEY_DELETE, 	71
+	CONSTANT EXTKEY_DOWN,		72
+	CONSTANT EXTKEY_RIGHT,		74
+	CONSTANT EXTKEY_UP,		75
+	CONSTANT EXTKEY_PGDN,		7A
+	CONSTANT EXTKEY_PGUP,		7D
+
+	CONSTANT EXTKEY_KEYPAD_ENTER,	5A	; keypad enter
+
+	CONSTANT EXTKEY_RIGHT_ALT,	11
+	CONSTANT EXTKEY_PRINT_SCREEN,	12	; two codes are send when you press printf screen, but they're both unique
+	CONSTANT EXTKEY_PRINT_SCREEN2,	7C	;
+;	CONSTANT EXTKEY_,
+
+	CONSTANT KEY_LEFT_SHIFT,	12
+	CONSTANT KEY_RIGHT_SHIFT,	59
+	CONSTANT KEY_LEFT_CONTROL,	14
+	CONSTANT KEY_LEFT_ALT,		11
+
+	CONSTANT MAX_LINE_LOWER,	68	; address of last character of last line +1
+	CONSTANT MAX_LINE_UPPER,	1F	; address of last character of last line +1
+	CONSTANT LAST_LINE_LOWER,	F0	; address of first character on last line
+	CONSTANT LAST_LINE_UPPER,	1E	; address of first character on last line
+
+;	CONSTANT MAX_CHAR_80_50,	0FA0
+;	CONSTANT LAST_LINE_80_50	0F50
+
+	CONSTANT MAX_LINE,		43	; 67 decimal lines (could be 0x32 for 50 lines or 0x18 for 24 lines)
+	CONSTANT CHAR_PER_LINE,		78	; could be 80 (0x50) but it's 120 (0x78)
+
+
+; special control keys (some are also shifted)
+; ctrl-[ 1B (escape)
+; ctrl-\ 1C
+; ctrl-] 1D
+; ctrl-^ 1E
+; ctrl-_ 1F
+; ctrl-? 7F delete 
+
+
+; shift-F1 is A1. 
+; alt-F1 is C1. alt overrides shift
+; ctrl-F1 is B1. control overrides alt and shift
+;
+; Copyright (c) 2017 Erik C. Quackenbush erikcq@quackenbush.com
+;
+; this Picoblaze-6 program implements a simple dumb terminal which talks to a host over the USB to serial 
+; converter and generates an HDMI 120x67 (or 80x50) character display.
+;
+;
+                    ;
+                    ; A delay of 1 second is implemented which is intended to give time for all the hardware
+                    ; to settle into a stable condition before starting to doing anything. This can be
+                    ; particularly beneficial when dealing with long cables where serial lines can take some
+                    ; time to reach the initial idle state following power being applied.
+                    ;
+        cold_start: CALL delay_1s                   ;
+                    ;
+                    CALL reset_UART_macros          ;Reset buffers in UART macros
+                    ;
+                    ;
+                    ; Initialised terminal display and display welcome messages
+                    ;
+                    ;
+                    
+		;	CALL div_test
+;
+                    ;------------------------------------------------------------------------------------------
+                    ; Main Program
+                    ;------------------------------------------------------------------------------------------
+; ANFSCD
+; TIATOTEBS
+		;
+		CONSTANT MSB_PORT,		02	; write the MSB of the cursor position here
+		CONSTANT LSB_PORT,		03	; write the LSB of the cursor position here
+		CONSTANT CHAR_PORT,		04	; write the character value here
+		CONSTANT CHAR_READ_PORT,	05	; read the character value here
+
+		CONSTANT ATTR_PORT,		09
+		CONSTANT ATTR_READ_PORT,	0A
+
+		CONSTANT PS2_READ_PORT,		06
+		CONSTANT PS2_STATUS_PORT,	07	; bit(0) is empty, bit(1) is full
+
+		;
+		; KEY_FLAG_REG contains these keyboard state flag bits
+		;
+		CONSTANT KEY_RELEASE,		01		; did this key have a release (F0) prefix?
+		CONSTANT LEFT_SHIFT,		02
+		CONSTANT RIGHT_SHIFT,		04
+		CONSTANT EITHER_SHIFT,		06
+		CONSTANT CAPS_LOCK,		08
+		CONSTANT LEFT_ALT,		10
+		CONSTANT ESCAPE_FLAG,		20		; was this sequence preceded by an ESCAPE?
+		CONSTANT LEFT_CONTROL,		40
+		CONSTANT EXTENDED,		80
+
+		CONSTANT KEY_RELEASE_CLR,	FE
+		CONSTANT LEFT_SHIFT_CLR,	FD
+		CONSTANT RIGHT_SHIFT_CLR,	FB
+		CONSTANT CAPS_LOCK_CLR,		F7
+		CONSTANT LEFT_ALT_CLR,		EF
+		CONSTANT ESCAPE_CLR,		DF
+		CONSTANT LEFT_CONTROL_CLR,	AF
+		CONSTANT EXTENDED_CLR,		7F
+
+		CONSTANT RELEASE_EXT_CLR,	7E	; clear both the extended and release flags
+
+		;
+		; we're going to need a second flag byte for RIGHT_CONTROL, LEFT_MENU, and RIGHT_MENU (windows keys)
+		; these are extended codes
+		; 
+		; we may also need a flag bit for CAPS_LOCK, NUM_LOCK, and SCROLL_LOCK but these are toggled on and 
+		; off unlike the shift modifier keys
+
+
+		;	NAMEREG	sE, CHAR_ROW 	
+		;	NAMEREG sF, CHAR_COLUMN
+		
+		NAMEREG	s6, COLOR_REG
+		NAMEREG	s7, KEY_FLAG_REG
+
+		NAMEREG	sB, CURSOR_LOW
+		NAMEREG sA, CURSOR_HIGH
+
+		NAMEREG s2, DIVIDEND_LOW
+		NAMEREG s3, DIVIDEND_HIGH
+
+		NAMEREG	s8, DIVISOR_LOW
+		NAMEREG s9, DIVISOR_HIGH
+
+
+		; tv_test sends a few characters to the CGRAM.
+		;
+	tv_test:	LOAD	KEY_FLAG_REG, 00	; set keyboard flags to zero
+			LOAD	COLOR_REG, F0		; bright white on black 
+			LOAD 	CURSOR_HIGH, 00
+			LOAD	CURSOR_LOW, 00			; set initial character position to 0x000
+			;LOAD	CHAR_ROW, 00
+			;LOAD	CHAR_COLUMN, 00
+			CALL	set_cursor
+
+			LOAD	DIVISOR_LOW,hello_msg'upper
+			LOAD	DIVISOR_HIGH,hello_msg'lower
+			CALL	print_string
+
+			LOAD	s5,"Q"
+			CALL	send_next
+			LOAD	s5,"U"
+			CALL	send_next
+			LOAD	s5,"A"
+			CALL	send_next
+			LOAD	s5,"C"
+			CALL	send_next
+			LOAD	s5,"K"
+			CALL	send_next
+
+			LOAD	s5, CR
+			CALL	UART_TX
+			LOAD	s5, ">"
+			CALL	UART_TX
+
+;
+; OK, we've sent our welcome message to the screen. Now we loop processing characters from the
+; UART and PS/2 ports.
+;
+;	The sA and sB registers hold the cursor address (linear).
+;	The KEY_FLAG_REG register holds the keyboard status bits (shift, caps lock, control, alt)
+;	The s6 register holds the current color attributes (MSB 16 foreground, LSB 16 background)
+;
+	echo_loop:
+			CALL 	PS2CHECK
+			CALL	UART_RX                 ;wait for a character and return in s5
+ 	                JUMP Z, echo_loop		;continue to wait if timeout occurs
+			CALL	send_next
+			COMPARE	s5, CR
+			JUMP	NZ, echo_NO_CR
+			CALL	UART_TX
+			LOAD	s5, 0A			; line feed
+			CALL	UART_TX
+			JUMP	echo_loop		; don't output hex if it's a CR
+	echo_NO_CR:	LOAD	s4,s5
+			CALL	hex_byte
+			LOAD	s5," "
+			CALL	UART_TX
+			JUMP	echo_loop
+
+
+; set_cursor
+; sets the cursor address for the HDMI character display to sAsB
+; returns without affecting any registers
+;
+	set_cursor:	OUTPUT 	CURSOR_HIGH, MSB_PORT		; set MSB of address
+			OUTPUT	CURSOR_LOW, LSB_PORT		; set LSB of address
+			RETURN
+
+	; alternate set_cursor for scrolling
+	set_cursor_CD:	OUTPUT 	sE, MSB_PORT		; set MSB of address
+			OUTPUT	sF, LSB_PORT		; set LSB of address
+			RETURN
+
+;
+; PS2CHECK reads a byte from the PS/2 keyboard port and converts it into ASCII
+; or a series of control codes. It keeps track of status bits in the KEY_FLAG_REG register (global)
+;
+	PS2CHECK:	INPUT	s4, PS2_STATUS_PORT	; read PS/2 status byte
+			TEST	s4, 01			; check low bit
+			RETURN	NZ			; empty FIFO
+			INPUT	s4, PS2_READ_PORT	; read PS/2 scan code byte from FIFO
+
+		;	JUMP	extended_code		; uncomment to just dump everything as hex instead of processing the scan codes
+		;	CALL	dump_status		; print out the status bits for debugging
+
+	check_release:
+			TEST	KEY_FLAG_REG,KEY_RELEASE		; was the last code an F0?
+			JUMP	Z, check_prefix		; no? OK, keep processing
+	left_shift_up:					; yes? is it a shift key release?
+			COMPARE	s4, KEY_LEFT_SHIFT
+			JUMP	NZ, right_shift_up
+			AND	KEY_FLAG_REG, LEFT_SHIFT_CLR
+			JUMP	finish_release
+	right_shift_up:
+			COMPARE	s4, KEY_RIGHT_SHIFT
+			JUMP	NZ, left_control_up
+			AND	KEY_FLAG_REG, RIGHT_SHIFT_CLR
+			JUMP	finish_release
+	left_control_up:
+	right_control_up:					; we don't pay attention to extended status yet, so these are the same (also right_alt & left_alt)
+			COMPARE	s4, KEY_LEFT_CONTROL
+			JUMP	NZ, left_alt_up
+			AND	KEY_FLAG_REG, LEFT_CONTROL_CLR
+			JUMP	finish_release
+	left_alt_up:
+	right_alt_up:
+			COMPARE	s4, KEY_LEFT_ALT
+			JUMP	NZ, right_control_up
+			AND	KEY_FLAG_REG, LEFT_ALT_CLR
+			JUMP	finish_release
+			
+	finish_release:
+			AND	KEY_FLAG_REG,RELEASE_EXT_CLR	; otherwise clear the extended and release bits and return
+			RETURN				; later we need to handle the shifting keys
+			; key release from previous?
+
+	check_prefix:
+
+	release_code:	COMPARE s4, F0			; key release prefix?
+			JUMP	NZ, standard_code
+			OR	KEY_FLAG_REG, KEY_RELEASE
+			RETURN
+
+	standard_code:
+			COMPARE s4, E0			; extended code prefix?
+			JUMP	NZ, check_modifiers
+			OR	KEY_FLAG_REG, EXTENDED
+			RETURN
+	check_modifiers:
+	caps_lock_hit:	COMPARE s4, 58				
+			JUMP	NZ, left_shift
+			XOR	KEY_FLAG_REG, CAPS_LOCK	; caps lock status is toggled on and off
+			RETURN
+
+	left_shift:	COMPARE s4, KEY_LEFT_SHIFT
+			JUMP	NZ, right_shift
+			OR	KEY_FLAG_REG,LEFT_SHIFT
+			RETURN
+
+	right_shift:	COMPARE	s4, KEY_RIGHT_SHIFT
+			JUMP	NZ, left_control
+			OR	KEY_FLAG_REG, RIGHT_SHIFT
+			RETURN
+
+	right_control: ; this is E0  14
+	left_control:	COMPARE	s4, KEY_LEFT_CONTROL
+			JUMP	NZ, left_alt
+			OR	KEY_FLAG_REG, LEFT_CONTROL
+			RETURN
+
+	right_alt:	; this is E0 11
+	left_alt:	COMPARE	s4, KEY_LEFT_ALT ; blah
+			JUMP	NZ, actual_key
+			OR	KEY_FLAG_REG, LEFT_ALT
+			RETURN
+
+	actual_key:
+	extended_keys:	TEST	KEY_FLAG_REG,EXTENDED
+			JUMP	Z, not_extended
+			
+			COMPARE	s4, EXTKEY_KEYPAD_ENTER	; 
+			JUMP	NZ, ext_up
+			LOAD	s5, CR
+			JUMP	printable_char
+	ext_up:
+			COMPARE	s4, EXTKEY_UP; 
+			JUMP	NZ, ext_down
+			LOAD	s5, up_key
+			JUMP	printable_char
+	ext_down:
+			COMPARE	s4, EXTKEY_DOWN 
+			JUMP	NZ, ext_right
+			LOAD	s5, down_key
+			JUMP	printable_char
+	ext_right:
+			COMPARE	s4, EXTKEY_RIGHT 
+			JUMP	NZ, ext_left
+			LOAD	s5, right_key
+			JUMP	printable_char
+	ext_left:
+			COMPARE	s4, EXTKEY_LEFT
+			JUMP	NZ, ext_home
+			LOAD	s5, left_key
+			JUMP	printable_char
+	ext_home:
+			COMPARE	s4, EXTKEY_HOME
+			JUMP	NZ, ext_end
+			LOAD	s5, home_key
+			JUMP	printable_char
+	ext_end:
+			COMPARE	s4, EXTKEY_END
+			JUMP	NZ, ext_other
+			LOAD	s5, end_key
+			JUMP	printable_char
+	
+	ext_other:	JUMP	extended_code	; not an extended character we recognize? Just do nothing
+
+
+
+	not_extended:	COMPARE s4, 84			; make sure we're in the valid range before jumping
+			JUMP	NC, special_code	; less than
+			LOAD	DIVISOR_LOW,SCAN_CODES'upper
+			LOAD	DIVISOR_HIGH,SCAN_CODES'lower
+			ADD	DIVISOR_HIGH, s4			; index offset
+			ADDCY	DIVISOR_LOW, 00		
+			CALL@	(DIVISOR_LOW,DIVISOR_HIGH)			; lookup our character code
+	check_printable:
+		;	COMPARE s5,80			; 
+		;	JUMP	C, check_modified
+		;	LOAD	s4,s5
+		;	JUMP	special_code		; uncomment these four lines if you want to see the high bit codes send to the UART as hex instead of being processed
+		
+	check_modified:	
+
+		;	JUMP	check_alpha	; normally this is commented out because we want shift to work on the symbol keys
+
+; check for control-[symbol] combinations
+
+	shifted_symbol:	TEST	KEY_FLAG_REG, EITHER_SHIFT
+			JUMP	Z, not_shifted
+
+
+	key1:		COMPARE	s5, "1"
+			JUMP	NZ, key2
+			LOAD	s5, "!"
+			JUMP	printable_char
+
+	key2:		COMPARE	s5, "2"
+			JUMP	NZ, key3
+			LOAD	s5, "@"
+			JUMP	printable_char
+
+	key3:		COMPARE	s5, "3"
+			JUMP	NZ, key4
+			LOAD	s5, "#"
+			JUMP	printable_char
+
+	key4:		COMPARE	s5, "4"
+			JUMP	NZ, key5
+			LOAD	s5, "$"
+			JUMP	printable_char
+
+	key5:		COMPARE	s5, "5"
+			JUMP	NZ, key6
+			LOAD	s5, "%"
+			JUMP	printable_char
+
+	key6:		COMPARE	s5, "6"
+			JUMP	NZ, key7
+			LOAD	s5, "^"
+			TEST	KEY_FLAG_REG, LEFT_CONTROL
+			JUMP	Z, printable_char
+			LOAD	s5, 1E			; ctrl-^ is code 0x1E
+			JUMP	printable_char
+
+	key7:		COMPARE	s5, "7"
+			JUMP	NZ, key8
+			LOAD	s5, "&"
+			JUMP	printable_char
+
+	key8:		COMPARE	s5, "8"
+			JUMP	NZ, key9
+			LOAD	s5, "*"
+			JUMP	printable_char
+
+	key9:		COMPARE	s5, "9"
+			JUMP	NZ, key10
+			LOAD	s5, "("
+			JUMP	printable_char
+
+	key10:		COMPARE	s5, "0"
+			JUMP	NZ, key11
+			LOAD	s5, ")"
+			JUMP	printable_char
+
+	key11:		COMPARE	s5, "`"
+			JUMP	NZ, key12
+			LOAD	s5, "~"
+			JUMP	printable_char
+
+	key12:		COMPARE	s5, "-"
+			JUMP	NZ, key13
+			LOAD	s5, "_"
+			TEST	KEY_FLAG_REG, LEFT_CONTROL
+			JUMP	Z, printable_char
+			LOAD	s5, 1F			; ctrl-_ is 0x1F
+			JUMP	printable_char
+
+	key13:		COMPARE	s5, "="
+			JUMP	NZ, key14
+			LOAD	s5, "+"
+			JUMP	printable_char
+
+	key14:		COMPARE	s5, ";"
+			JUMP	NZ, key15
+			LOAD	s5, ":"
+			JUMP	printable_char
+
+	key15:		COMPARE	s5, "'"
+			JUMP	NZ, key16
+			LOAD	s5, 22	; double quotes
+			JUMP	printable_char
+
+	key16:		COMPARE	s5, "["
+			JUMP	NZ, key17
+			LOAD	s5, "{"
+			JUMP	printable_char
+
+	key17:		COMPARE	s5, "]"
+			JUMP	NZ, key18
+			LOAD	s5, "}"
+			JUMP	printable_char
+
+	key18:		COMPARE	s5, "\"
+			JUMP	NZ, key19
+			LOAD	s5, "|"
+			JUMP	printable_char
+
+	key19:		COMPARE	s5, ","
+			JUMP	NZ, key20
+			LOAD	s5, "<"
+			JUMP	printable_char
+
+	key20:		COMPARE	s5, "."
+			JUMP	NZ, key21
+			LOAD	s5, ">"
+			JUMP	printable_char
+
+	key21:		COMPARE	s5, "/"
+			JUMP	NZ, check_alpha
+			LOAD	s5, "?"
+			TEST	KEY_FLAG_REG, LEFT_CONTROL
+			JUMP	Z, printable_char
+			LOAD	s5, 7F			; delete key is also CTRL-?
+			JUMP	printable_char
+	key21ctrl:
+			JUMP	printable_char
+
+	not_shifted:
+	control_symbol:
+;
+; at this point we know the control key is pressed and the shift keys are not pressed,
+; so we handle a few special cases that are not alpha (A-Z) control codes
+;
+			TEST	KEY_FLAG_REG, LEFT_CONTROL
+			JUMP	Z, check_alpha
+
+	key00:		COMPARE s5, "["
+			JUMP	NZ, key01
+			LOAD	s5, 1B			; ESCAPE
+			JUMP	printable_char
+
+	key01:		COMPARE s5, "\"
+			JUMP	NZ, key02
+			LOAD	s5, 1C			; ESCAPE +1, rarely used but we support it
+			JUMP	printable_char
+
+	key02:		COMPARE s5, "["
+			JUMP	NZ, check_alpha
+			LOAD	s5, 1D			; ESCAPE +2, rarely used but we support it
+			JUMP	printable_char
+
+;
+; here we check to see if we're an alpha character (a-z) and we handle shift, control, and caps lock.
+;
+;
+	check_alpha:
+				; are we shifted or controlled?
+			COMPARE	s5, 7B			; lower case 'z' plus one
+			JUMP	NC, printable_char	; we're above Z
+			COMPARE	s5, 60			; lower case 'a' minus one
+			JUMP	C, printable_char
+			JUMP	Z, printable_char	; we're below or equal to 'a' minus one
+
+			TEST	KEY_FLAG_REG, LEFT_CONTROL
+			JUMP	Z, check_shift
+			SUB	s5, 60			; we're a control character, so we start at 0
+			JUMP	printable_char
+
+	check_shift:	TEST	KEY_FLAG_REG,CAPS_LOCK
+			JUMP	Z, no_caps_lock
+			TEST	KEY_FLAG_REG, EITHER_SHIFT
+			JUMP	NZ, printable_char	; we do the shift thing but we're NZ instead of Z
+			SUB	s5, 20
+			JUMP	printable_char
+			
+	no_caps_lock:	TEST	KEY_FLAG_REG, EITHER_SHIFT
+			JUMP	Z, printable_char
+			SUB	s5, 20			; we're upper case so we start at 40
+
+;
+; at this point we've processed everything and have a character in s5.
+; here is where we actually DO something with the character code. 
+;
+	printable_char: 				
+			
+	print_the_char:
+			CALL	send_next		; send it to the HDMI
+			CALL	UART_TX			; sent it to the serial port
+			RETURN
+
+;
+; dump a hex value to the serial port for debugging
+;
+;
+	extended_code:
+			AND	KEY_FLAG_REG, EXTENDED_CLR	; clear the extended flag
+	special_code:
+	dump_status:
+			LOAD	s5, "["
+			CALL	UART_TX			
+			CALL	hex_byte
+			LOAD	s5, "]"
+			CALL	UART_TX
+			RETURN
+;
+; send_next 
+; writes a character in s5 to the HDMI terminal. It processes control sequences and
+; handles scrolling when appropriate.
+;
+	send_next:	
+			COMPARE s5, 1B			; ESCAPE sequence begins
+			JUMP	Z, escape
+			COMPARE s5, BS 			; control-h is backspace
+			JUMP 	Z, backspace
+			COMPARE s5, CR			; carriage return 0x0D ctrl-m
+			JUMP 	Z, carriage_return
+			COMPARE	s5, LF			; line feed 0x0A ctrl-j
+			JUMP 	Z, line_feed
+			COMPARE	s5, 0C			; FORM FEED ^L 0x0C
+			JUMP	Z, form_feed
+			COMPARE s5, down_key
+			JUMP 	Z, line_feed
+			COMPARE s5, up_key
+			JUMP 	Z,	vertical_tab
+			COMPARE s5, left_key
+			JUMP 	Z,	left_cursor
+			COMPARE s5, right_key
+			JUMP 	Z,	right_cursor
+			COMPARE s5, F1_key
+			JUMP 	Z,	function_1
+			COMPARE s5, F2_key
+			JUMP 	Z, function_2
+			COMPARE s5, F3_key
+			JUMP	Z, function_3
+			COMPARE s5, F4_key
+			JUMP	Z, function_4
+			COMPARE s5, F5_key
+			JUMP	Z, function_5
+	raw_char_out:					; if you don't want to process any control or escape codes
+			OUTPUT	s5, CHAR_PORT
+			OUTPUT	COLOR_REG, ATTR_PORT
+	increment_char:	ADD	CURSOR_LOW, 01			;
+			ADDCY	CURSOR_HIGH, 00			; 16 bit increment (we do no range checking. addresses will wrap at 2047 to 0)
+			CALL	set_cursor
+			COMPARE CURSOR_LOW, MAX_LINE_LOWER
+			COMPARECY CURSOR_HIGH,MAX_LINE_UPPER	; are we at the end of the screen?
+;			COMPARE CURSOR_LOW, A0
+;			COMPARECY CURSOR_HIGH,0F			; are we at the end of the screen?
+			RETURN	NZ			; no, we return
+			JUMP	scroll_up
+
+; these are the ANSI/ASCII functions.
+; This is where we process control characters like backspace, cursor movement, carriage return, etc.
+;
+
+	escape:		
+			RETURN
+
+	backspace:	SUB	CURSOR_LOW, 01
+			SUBCY   CURSOR_HIGH, 00			; 16 bit decrement (we do no range checking here. addresses will wrap from 0 to 2047)
+			CALL	set_cursor
+			LOAD	s4, 00
+			OUTPUT	s4, CHAR_PORT
+			OUTPUT	COLOR_REG, ATTR_PORT
+			RETURN	
+
+	left_cursor:
+			LOAD	DIVIDEND_LOW, CURSOR_LOW
+			LOAD	DIVIDEND_HIGH, CURSOR_HIGH
+			LOAD	DIVISOR_LOW, CHAR_PER_LINE
+			LOAD	DIVISOR_HIGH, 00
+			CALL	divide_16bit_by_any
+			COMPARE	sE,00			
+			RETURN	Z			; do nothing if we're on the left edge
+			SUB	CURSOR_LOW, 01
+			SUBCY	CURSOR_HIGH, 00
+			CALL	set_cursor
+			RETURN
+
+	right_cursor:
+			LOAD	DIVIDEND_LOW, CURSOR_LOW
+			LOAD	DIVIDEND_HIGH, CURSOR_HIGH
+			ADD	DIVIDEND_LOW, 01
+			ADDCY	DIVIDEND_HIGH, 00
+			LOAD	DIVISOR_LOW, CHAR_PER_LINE
+			LOAD	DIVISOR_HIGH, 00
+			CALL	divide_16bit_by_any	; 
+			COMPARE	sE,00			
+			RETURN	Z			; do nothing if we're on the right edge
+			
+			ADD	CURSOR_LOW, 01
+			ADDCY	CURSOR_HIGH, 00
+			CALL	set_cursor
+			RETURN
+
+	vertical_tab:
+			COMPARE	CURSOR_LOW, CHAR_PER_LINE
+			COMPARECY CURSOR_HIGH, 00
+			RETURN	C				; do nothing if we're on the top line
+
+			SUB	CURSOR_LOW, CHAR_PER_LINE	; move the cursor up one line. we need to scroll up or stop at the top which we don't do right now.
+			SUBCY	CURSOR_HIGH, 00
+			CALL	set_cursor
+			RETURN
+
+	line_feed:	ADD	CURSOR_LOW, CHAR_PER_LINE
+			ADDCY	CURSOR_HIGH, 00			; move the cursor down one line
+			CALL	set_cursor
+			RETURN	
+
+	form_feed:
+			LOAD	CURSOR_LOW,00
+			LOAD	CURSOR_HIGH,00
+			LOAD	s4,20			; fill the screen with spaces
+	clear_a_char:	CALL	set_cursor
+			OUTPUT	s4, CHAR_PORT
+			OUTPUT	COLOR_REG, ATTR_PORT
+			ADD	CURSOR_LOW,01			; increment
+			ADDCY	CURSOR_HIGH,00
+			COMPARE	CURSOR_LOW, MAX_LINE_LOWER
+			COMPARECY CURSOR_HIGH,MAX_LINE_UPPER
+			JUMP	NZ, clear_a_char
+			LOAD	CURSOR_LOW,00
+			LOAD	CURSOR_HIGH,00
+			CALL	set_cursor		; set the cursor to the top left
+			RETURN
+
+	carriage_return:
+
+			LOAD	DIVIDEND_LOW, CURSOR_LOW
+			LOAD	DIVIDEND_HIGH, CURSOR_HIGH
+			LOAD	DIVISOR_LOW, CHAR_PER_LINE
+			LOAD	DIVISOR_HIGH, 00
+			CALL	divide_16bit_by_any
+			COMPARE	sE,00			; are we on the left edge? 
+			JUMP 	Z, cr_leftedge
+			SUB	CURSOR_LOW, sE			; no, subtract the remainder to put us at the left edge
+			SUBCY	CURSOR_HIGH, 00
+;			JUMP	cr_regadjust
+	cr_leftedge:	ADD	CURSOR_LOW,CHAR_PER_LINE	; add 80 characters
+			ADDCY	CURSOR_HIGH,00
+
+			COMPARE	CURSOR_LOW, MAX_LINE_LOWER	; are we past the end? FA0 = 4000 decimal
+			COMPARECY CURSOR_HIGH, MAX_LINE_UPPER
+
+			JUMP	Z, scroll_up
+
+	cr_regadjust:	CALL	set_cursor
+			RETURN
+
+	scroll_up:	LOAD	CURSOR_LOW, CHAR_PER_LINE	; copying from 0x0050
+			LOAD	CURSOR_HIGH, 00
+			LOAD	sE, 00			; copying to 0x0000
+			LOAD	sF, 00
+	scroll_loop:	CALL	set_cursor
+			INPUT	s5, CHAR_READ_PORT
+			INPUT	s4, ATTR_READ_PORT
+			CALL	set_cursor_CD
+			OUTPUT	s5, CHAR_PORT
+			OUTPUT	s4, ATTR_PORT
+			ADD	CURSOR_LOW, 01
+			ADDCY	CURSOR_HIGH, 00
+			ADD	sF, 01
+			ADDCY	sE, 00
+			COMPARE CURSOR_LOW, MAX_LINE_LOWER
+			COMPARECY CURSOR_HIGH,MAX_LINE_UPPER
+			JUMP	NZ, scroll_loop
+	clear_last_line:LOAD	CURSOR_LOW, LAST_LINE_LOWER
+			LOAD	CURSOR_HIGH, LAST_LINE_UPPER
+			LOAD	s5, 00	; blah
+	clear_loop:	call	set_cursor
+			OUTPUT	s5, CHAR_PORT
+			OUTPUT	COLOR_REG, ATTR_PORT
+			ADD	CURSOR_LOW, 01
+			ADDCY	CURSOR_HIGH, 00
+			COMPARE	CURSOR_LOW, MAX_LINE_LOWER
+			COMPARECY CURSOR_HIGH, MAX_LINE_UPPER
+			JUMP	NZ, clear_loop
+			
+	done_scrolling:	LOAD	CURSOR_LOW, LAST_LINE_LOWER
+			LOAD	CURSOR_HIGH, LAST_LINE_UPPER
+			CALL	set_cursor
+			RETURN
+
+; this function fill the attribute memory with interesting color values
+	function_5:	STORE	CURSOR_HIGH, 02
+			STORE	CURSOR_LOW, 03
+			LOAD	s5,00
+			LOAD	CURSOR_HIGH, 00
+			LOAD	CURSOR_LOW, 00
+	loop_colors:	CALL	set_cursor
+			OUTPUT	s5, ATTR_PORT
+			ADD	s5, 01
+			COMPARE	s5, 00
+			JUMP	Z, finish_colors
+			ADD	CURSOR_LOW, 01
+			ADDCY	CURSOR_HIGH, 00
+			JUMP	loop_colors
+
+	finish_colors:
+			FETCH	CURSOR_HIGH, 02
+			FETCH	CURSOR_LOW, 03
+			CALL	set_cursor
+			RETURN
+
+
+; this function dumps the entire 256 character set to the display
+	function_4: 
+			LOAD	s5,00
+	ascii_set:	
+			STORE	s5, 01
+			CALL	raw_char_out
+			FETCH	s5, 01
+		;	OUTPUT	s5, CHAR_PORT
+		;	CALL	increment_char
+		;	ADD	CURSOR_LOW,01
+		;	ADDCY	CURSOR_HIGH,00
+		;	CALL	set_cursor
+			ADD	s5,01
+			COMPARE	s5,00
+			RETURN	Z
+			JUMP	ascii_set
+
+	function_3:
+			LOAD	s5, CR
+			CALL	UART_TX
+	key_scan:	LOAD	s5, "["
+			CALL	UART_TX
+			INPUT	s4, PS2_STATUS_PORT
+			CALL	hex_byte
+			LOAD	s5," "
+			CALL	UART_TX
+			INPUT	s4, PS2_READ_PORT
+			CALL	hex_byte
+			LOAD	s5," "
+			CALL	UART_TX
+			INPUT	s4, PS2_STATUS_PORT
+			CALL	hex_byte
+			LOAD	s5, "]"
+			CALL	UART_TX
+			RETURN
+
+	function_2:	JUMP	scroll_up		; F2 tests our scrolling function
+
+	function_1:
+			RETURN
+
+; print_string:
+; sends NULL terminated STRING to the HDMI character display
+; string pointer is passed in s8s9
+; returns with s8s9 pointing to NUL terminator at end of string
+; does not affect other registers
+	print_string:	CALL@ (DIVISOR_LOW,DIVISOR_HIGH)
+                    	COMPARE s5, 00                  ;terminate on NUL character
+                    	RETURN Z
+			CALL send_next                  	
+                    	ADD DIVISOR_HIGH, 1'd
+                    	ADDCY DIVISOR_LOW, 0'd
+                    	JUMP print_string
+
+; hex_byte
+; echo the 8 bit value of s4 to the serial port in hexadecimal 
+; followed by a space (three characters total are sent)
+; the s5 register is corrupted by this function
+     	hex_byte:	LOAD s5, s4                     ;isolate upper nibble
+			SR0 s5
+			SR0 s5
+			SR0 s5
+			SR0 s5
+			CALL hex_to_text               ; convert to ASCII
+			CALL UART_TX                    ;send upper digit to UART
+			LOAD s5, s4                     ;isolate lower nibble
+			AND s5, 0F
+			CALL hex_to_text               ; convert to ASCII
+			CALL UART_TX                    ;send lower digit to UART
+                	RETURN 
+
+			; Convert value 00 to 0F provided in 's5' into ASCII character in 's5'
+        	 	; Register used s5
+	hex_to_text:	SUB s5, 0A                      ;test if value is in range 0 to 9
+                    	JUMP C, number_to_char
+                    	ADD s5, 07                      ;ASCII char A to F in range 41 to 46
+	number_to_char:	ADD s5, 3A                      ;ASCII char 0 to 9 in range 30 to 40
+                    	RETURN 
+               
+
+			STRING hello$, "Hello, world. And now for something completely different!"
+
+	hello_msg:	LOAD&RETURN s5, hello$
+			;LOAD&RETURN s5, CR
+			LOAD&RETURN s5, NUL
+
+
+                 ;
+; Divide 16-bit binary integer
+;
+; The value to be divided by should be provided in register set [DIVIDEND_HIGH,DIVIDEND_LOW].
+; The divisor should be placed in DIVISOR_LOW,DIVISOR_HIGH (currently the divisor is hard coded to 0x78)
+; The routine will return the integer result [DIVIDEND_HIGH,s2]/80 back in[DIVIDEND_HIGH,DIVIDEND_LOW]
+; with any remainder in register sE.
+; Registers used s0,DIVIDEND_LOW,DIVIDEND_HIGH,DIVISOR_LOW,DIVISOR_HIGH,sE,sF
+
+
+divide_16bit_by_any:	LOAD sE, DIVIDEND_LOW                     ;copy input value into [CURSOR_LOW,sA]
+                   	LOAD sF, DIVIDEND_HIGH
+                   	LOAD DIVIDEND_LOW, 00                     ;clear division result
+                   	LOAD DIVIDEND_HIGH, 00
+			LOAD DIVISOR_HIGH, 78			; OK, so we actually always divide by 120 right now. could also divide by 80 (0x50)
+			LOAD DIVISOR_LOW, 00
+                   	LOAD s0, 9'd                   ;9 subtract and shift iterations to be performed (0x50 uses 7 bits for a total of 16)
+							; a general purpose subtract function would perform all 16 shifts and would have the 
+							; 8-bit divisor loaded straight into s8 with s9 being 00 (the MSB)
+        div_loop:	SUB sE,DIVISOR_LOW                      ;perform 16-bit subtract [CURSOR_LOW,sA]-[DIVISOR_HIGH,DIVISOR_LOW]
+                   	SUBCY sF,DIVISOR_HIGH
+                   	JUMP C, div_restore           ;if carry then could not subtract from total
+                   	SL1 DIVIDEND_LOW                          ;shift '1' into result because subtract ok
+                   	JUMP div_shifts
+     div_restore:	ADD sE,DIVISOR_LOW                      ;perform 16-bit addition [CURSOR_LOW,sA]+[DIVISOR_HIGH,DIVISOR_LOW]
+                   	ADDCY sF,DIVISOR_HIGH                    ;to restore total
+                   	SL0 DIVIDEND_LOW                ;shift '0' into result because could no subtract
+      div_shifts:	SLA DIVIDEND_HIGH               ;complete 16-bit shift left into [DIVIDEND_HIGH,s2]
+                   	SR0 DIVISOR_HIGH                          ;divide '10' value by 2 (shift right 1 place)
+                   	SRA DIVISOR_LOW
+                   	SUB s0, 01                      ;count iterations
+                   	RETURN Z                        ;on return the remainder of division is in sA
+                   	JUMP div_loop
+
+
+; delay for one second
+;1s is 50,000,000 clock cycles requiring 6,250,000 delay iterations
+;
+          delay_1s: LOAD DIVIDEND_LOW, 5F
+                    LOAD s1, 5E
+                    LOAD s0, 10
+                    JUMP software_delay
+                    ;
+                    ; The delay loop decrements [DIVIDEND_LOW,s1,s0] until it reaches zero
+                    ; Each decrement cycle is 4 instructions which is 8 clock cycles (160ns at 50MHz)
+                    ;
+    software_delay: SUB s0, 1'd
+                    SUBCY s1, 0'd
+                    SUBCY DIVIDEND_LOW, 0'd
+                    JUMP NZ, software_delay
+                    RETURN 
+
+; send_CR sends a carriage return (0D) out the serial port
+;
+           send_CR: LOAD s5, CR
+                    JUMP UART_TX                    ;includes RETURN
+
+; send_SPC sends a space (20) out the serial port
+;
+	send_SPC:	LOAD s5, " "
+			JUMP UART_TX
+
+
+;
+; the scan code table lists the natural unshifted ASCII value associated with each code from
+; the SCAN CODE 2 table. Function keys start at 0x91 and go to 0x9C (F1-F12). 
+;
+; Non-printable keys are assigned a value of 0x00 and are handled separately from within
+; PS2CHECK. The numeric keypad keys do not support modifiers or NUMLOCK yet.
+;
+; the exceptions are: 
+; ESC which is assigned the non-printable value of 0x1B.
+; RETURN which is assigned the non-printable value of 0x0D (CR)
+; TAB which is assigned the non-printable value of 0x09 (^I)
+;
+; this table does not encode any of the extended keys (scan codes with prefix E0 or E1). Those
+; are also handled separately by PS2CHECK.
+
+	SCAN_CODES:	LOAD&RETURN	s5,00	; 00
+			LOAD&RETURN	s5,DE	; 01 F9 (99)
+			LOAD&RETURN	s5,00	; 02
+			LOAD&RETURN	s5,95	; 03 F5
+			LOAD&RETURN	s5,93	; 04 F3
+			LOAD&RETURN	s5,91	; 05 F1
+			LOAD&RETURN	s5,92	; 06 F2
+			LOAD&RETURN	s5,9C	; 07 F12
+			LOAD&RETURN	s5,00	;
+			LOAD&RETURN	s5,DF	; 09 F10 (9A)
+			LOAD&RETURN	s5,DD	; 0A F8 (98)
+			LOAD&RETURN	s5,DB	; 0B F6 (96)
+			LOAD&RETURN	s5,94	; 0C F4
+			LOAD&RETURN	s5,09	; 0D Tab
+			LOAD&RETURN	s5,"`"	; 0E
+			LOAD&RETURN	s5,00	; 0F
+			LOAD&RETURN	s5,00	; 10
+			LOAD&RETURN	s5,00	; 11 left alt
+			LOAD&RETURN	s5,00	; 12 left shift
+			LOAD&RETURN	s5,00	; 13 
+			LOAD&RETURN	s5,00	; 14 left CTRL
+			LOAD&RETURN	s5,"q"	; 15 q
+			LOAD&RETURN	s5,"1"	; 16 1 (one)
+			LOAD&RETURN	s5,00	; 17 
+			LOAD&RETURN	s5,00	; 18 
+			LOAD&RETURN	s5,00	; 19 
+			LOAD&RETURN	s5,"z"	; 1A z
+			LOAD&RETURN	s5,"s"	; 1B s
+			LOAD&RETURN	s5,"a"	; 1C a
+			LOAD&RETURN	s5,"w"	; 1D w
+			LOAD&RETURN	s5,"2"	; 1E 2
+			LOAD&RETURN	s5,00	; 1F
+			LOAD&RETURN	s5,00	; 20
+			LOAD&RETURN	s5,"c"	; 21 c
+			LOAD&RETURN	s5,"x"	; 22 x
+			LOAD&RETURN	s5,"d"	; 23 d
+			LOAD&RETURN	s5,"e"	; 24 e
+			LOAD&RETURN	s5,"4"	; 25 4
+			LOAD&RETURN	s5,"3"	; 26 3
+			LOAD&RETURN	s5,00	; 27
+			LOAD&RETURN	s5,00	; 28 
+			LOAD&RETURN	s5," "	; 29 space
+			LOAD&RETURN	s5,"v"	; 2A v
+			LOAD&RETURN	s5,"f"	; 2B f
+			LOAD&RETURN	s5,"t"	; 2C t
+			LOAD&RETURN	s5,"r"	; 2D r
+			LOAD&RETURN	s5,"5"	; 2E 5
+			LOAD&RETURN	s5,00	; 2F
+			LOAD&RETURN	s5,00	; 30
+			LOAD&RETURN	s5,"n"	; 31 n
+			LOAD&RETURN	s5,"b"	; 32 b
+			LOAD&RETURN	s5,"h"	; 33 h
+			LOAD&RETURN	s5,"g"	; 34 g
+			LOAD&RETURN	s5,"y"	; 35 y
+			LOAD&RETURN	s5,"6"	; 36 6
+			LOAD&RETURN	s5,00	; 37
+			LOAD&RETURN	s5,00	; 38
+			LOAD&RETURN	s5,"`"	; 39 accent grave
+			LOAD&RETURN	s5,"m"	; 3A m
+			LOAD&RETURN	s5,"j"	; 3B j
+			LOAD&RETURN	s5,"u"	; 3C u
+			LOAD&RETURN	s5,"7"	; 3D 7
+			LOAD&RETURN	s5,"8"	; 3E 8
+			LOAD&RETURN	s5,00	; 3F
+			LOAD&RETURN	s5,00	; 40
+			LOAD&RETURN	s5,","	; 41 ,
+			LOAD&RETURN	s5,"k"	; 42 k
+			LOAD&RETURN	s5,"i"	; 43 i
+			LOAD&RETURN	s5,"o"	; 44 o
+			LOAD&RETURN	s5,"0"	; 45 0 (zero)
+			LOAD&RETURN	s5,"9"	; 46 9
+			LOAD&RETURN	s5,00	; 47
+			LOAD&RETURN	s5,00	; 48
+			LOAD&RETURN	s5,"."	; 49 .
+			LOAD&RETURN	s5,"/"	; 4A /
+			LOAD&RETURN	s5,"l"	; 4B l (L)
+			LOAD&RETURN	s5,";"	; 4C ;
+			LOAD&RETURN	s5,"p"	; 4D p
+			LOAD&RETURN	s5,"-"	; 4E -
+			LOAD&RETURN	s5,00	; 4F
+			LOAD&RETURN	s5,00	; 50
+			LOAD&RETURN	s5,00	; 51
+			LOAD&RETURN	s5,"'"	; 52 '
+			LOAD&RETURN	s5,00	; 53
+			LOAD&RETURN	s5,"["	; 54 [
+			LOAD&RETURN	s5,"="	; 55 =
+			LOAD&RETURN	s5,00	; 56
+			LOAD&RETURN	s5,00	; 57
+			LOAD&RETURN	s5,00	; 58 caps lock
+			LOAD&RETURN	s5,00	; 59 right shift
+			LOAD&RETURN	s5,CR	; 5A enter
+			LOAD&RETURN	s5,"]"	; 5B ]
+			LOAD&RETURN	s5,00	; 5C
+			LOAD&RETURN	s5,"\"	; 5D \
+			LOAD&RETURN	s5,00	; 5E
+			LOAD&RETURN	s5,00	; 5F
+			LOAD&RETURN	s5,00	; 60
+			LOAD&RETURN	s5,00	; 61
+			LOAD&RETURN	s5,00	; 62
+			LOAD&RETURN	s5,00	; 63
+			LOAD&RETURN	s5,00	; 64
+			LOAD&RETURN	s5,00	; 65
+			LOAD&RETURN	s5,08	; 66 BACKSPACE
+			LOAD&RETURN	s5,00	; 67
+			LOAD&RETURN	s5,00	; 68
+			LOAD&RETURN	s5,"1"	; 69 1 (KEYPAD)
+			LOAD&RETURN	s5,00	; 6A
+			LOAD&RETURN	s5,"4"	; 6B 4 (KEYPAD)
+			LOAD&RETURN	s5,00	; 6C
+			LOAD&RETURN	s5,00	; 6D
+			LOAD&RETURN	s5,00	; 6E
+			LOAD&RETURN	s5,00	; 6F
+			LOAD&RETURN	s5,"0"	; 70 0(KEYPAD)
+			LOAD&RETURN	s5,"."	; 71 .(KEYPAD)
+			LOAD&RETURN	s5,"2"	; 72 2(KEYPAD)
+			LOAD&RETURN	s5,"5"	; 73 5(KEYPAD)
+			LOAD&RETURN	s5,"6"	; 74 6(KEYPAD)
+			LOAD&RETURN	s5,"8"	; 75 8(KEYPAD)
+			LOAD&RETURN	s5,1B	; 76 ESC
+			LOAD&RETURN	s5,00	; 77 NUM LOCK
+			LOAD&RETURN	s5,9B	; 78 F11 (9B)
+			LOAD&RETURN	s5,"+"	; 79 +(KEYPAD)
+			LOAD&RETURN	s5,"3"	; 7A 3(KEYPAD)
+			LOAD&RETURN	s5,"-"	; 7B -(KEYPAD)
+			LOAD&RETURN	s5,"*"	; 7C *(KEYPAD)
+			LOAD&RETURN	s5,"9"	; 7D 9(KEYPAD)
+			LOAD&RETURN	s5,00	; 7E SCROLL LOCK
+			LOAD&RETURN	s5,00	; 7F
+			LOAD&RETURN	s5,00	; 80
+			LOAD&RETURN	s5,00	; 81
+			LOAD&RETURN	s5,00	; 82
+	MAX_SCAN_CODE:	LOAD&RETURN	s5,DC	; 83 F7 (97)
+
+                    INCLUDE "uart_interface_routines.psm"
+                    ;
+                    ;
+                    ;------------------------------------------------------------------------------------------
+                    ; End of Program
+                    ;------------------------------------------------------------------------------------------
+                    ;

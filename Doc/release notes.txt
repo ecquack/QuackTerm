@@ -1,0 +1,811 @@
+Things to do:
+21. CSI 4 h should enable insert mode. inserts on current line only.
+22. CSI 4L should disable insert mode
+
+V 0.44
+
+Increased the version number to 1.02
+
+The command ESC(a sets video mode 0.
+The command ESC(b sets video mode 1.
+The command ESC(c sets video mode 2.
+The command ESC(d sets video mode 3.
+The command ESC(e sets video mode 4.
+The command ESC(f sets video mode 5.
+The command ESC(g sets video mode 6.
+The command ESC(h sets video mode 7.
+
+V 0.43
+
+reversed the polarity of the NUMLOCK LED to match the PC. It now defaults to LED off, arrow key mode.
+
+the shift key now disables the numlock state, originally with comical results as it didn't do numbers but their
+shifted equivalents. bugs can be amusing. this one is fixed.
+
+There are only 94 instructions left in the keyboard processor ROM. This means that to support international keyboards (like the 
+French Canadian keyboard I have) will require an additional BRAM.
+
+the typematic rate is left at the default speed until you press alt-numlock, then it speeds up to maximum (0). there is no
+way to slow it down again except to restart the keyboard (power cycle).
+
+delete line now works correctly if you're on the bottom line.
+insert line now works correctly if you're on the bottom line.
+
+ESC?25h shows the cursor
+ESC?25l hides the cursor
+
+ESC(1 sets alternate font mode (same as CSI 12m)
+ESC(2 sets alternate font with graphics mode (same as CSI 13m)
+
+V 0.42
+ 
+
+We now support an alternate font, so if you want to view that ANSI art that was created with codepage 437
+all you need to do is prepend the code ESC [ 12 m to the file.
+
+The alternate font can be used in graphics mode ESC [ 13 m which maps the lower 32 characters to the lower case
+letters. ESC [ 10 m returns to the default font.
+
+We now support underline mode. CSI 4 m sets underline mode. CSI 24 m clears underline mode.
+The underline is only one physical pixel tall. This makes it possible (just) to discern the
+difference between lower case 'q' and lower case 'g' with descenders.
+
+We now have a block cursor option in hardware.
+CSI ?12h sets block cursor
+CSI ?12l sets normal cursor
+
+check FIFOs with underline code loops.
+
+Removed unused RESET signal from FIFO64FWFT.
+
+
+V 0.41
+
+Moved the ANSI terminal VHDL into a module separate from the video generator and the UART. 
+
+V 0.40
+
+491 instructions free.
+
+
+Optimized insert and delete copy loops for performance now that I can afford the instructions.
+Insert and delete lines ESC[L & ESC[M now cause no FIFO loss.
+
+Sending TWO insert lines causes a FIFO loss.
+Sending TWO delete lines also causes a FIFO loss.
+
+Inserting lines at the top of the screen now uses scroll_down for performance.
+Deleting lines at the top of the screen should use scroll_up.
+
+Erase Page (0,1,2) causes no FIFO loss.
+
+test pattern (ctrl-A) no longer locks up when it scrolls
+
+ESC[#S now scrolls up.
+ESC[#T now scrolls down.
+
+typematic rate is broken
+
+We now have a custom codepage-1252 font that has the VT100 graphics characters in the lower 32.
+Our terminal type is now "xterm". 
+
+
+V 0.39
+
+
+We have 590 instructions free.
+
+All 8 video modes now work in hardware and software. Might have to add borders for the 80 column modes or it will look strange
+We need to test every function that calls a "compare_" subroutine. We might want to consider going with 80x24 instead of 80x25.
+
+
+alt-scroll_lock now cycles through all 8 video modes. It displays the mode number and character resolution on the splash line.
+
+Fixed the half duplicated line in tall mode.
+
+V 0.38
+
+Delete line ESC[#M now accepts a count parameter. Illegal values will do strange things
+Insert line ESC[#L now accepts a count parameter. Illegal values will do strange things.
+
+alt-scroll_lock toggles tall video mode, which shows a duplicate half line at the bottom of the screen.
+
+V 0.37
+
+We have 706 instruction words free.
+
+We now support ESC(0 to enter VT100 graphics mode and ESC(B to return to normal mode.
+
+We now support a more complete set of VT100 graphics characters in ESC[11m/ESC(0 mode. 
+xterm says it does the following:
+	acsc=``aaffggiijjkkllmmnnooppqqrrssttuuvvwwxxyyzz{{||}}~~,
+We do not support i,o,p,r, or s because our font does not have those symbols.
+
+Fixed a couple of ADDCY bugs that caused the cursor to advance strangely.
+
+Backspace now wraps to the previous line all the way to the top left.
+
+added a "dummy_led" to the keyboard processor to work around a puzzling bug.
+
+control-scroll_lock now toggles RAW debug mode.
+shift-scroll_lock toggles local echo
+alt-scroll_lock advances to the next video mode
+control-alt-shift-scroll_lock now resets the terminal
+
+shift-num_lock toggles conversion of control codes from the keyboard into ^X strings (caret followed by capital letter).
+control-num_lock toggles nethack mode in the keyboard as before
+
+
+V 0.36
+
+The PS/2 keyboard and the ANSI command interpreter have been split into two separate picoblaze microprocessors.
+The keyboard processor has a 1Kx18 ROM (143 words free) and no JTAG programming support. The ANSI processor has
+a 2Kx18 ROM (795 words free) and support for JTAG programming and debugging. They are connected by a FIFO.
+
+F1/F2/F3/F4 now send ESC O P/Q/R/S unless there are modifiers, in which case they send CSI 1;<mod>P/Q/R/S
+
+The scroll_lock key sends special codes starting with 0x9E. 
+
+The Windows key, Menu key, pause/break key, and print screen/sysreq key all send tilde codes in the 4X range with
+modifiers if present.
+
+
+V 0.35
+
+
+
+The typematic rate of the keyboard is now set at initialization time to 26.7 CPS with a delay of 250 millisecond.
+
+Completely removed the old PS2 code from Digikey. We're now using code from  Peter Wendrich (pwsoft@syntiac.com). It's covered
+by the GPL.
+
+Removed three 1-bit latches. Changed the io_ps2_keyboard so that it uses std_logic_vector
+instead of unsigned.
+
+V 0.34
+
+The keyboard LEDs now work. Scroll lock is only toggled when you type shift-scroll_lock (local echo mode).
+Right now we have two different entities processing keyboard input, which is a waste of slices and could lead
+to spurious codes being read, but it seems to work properly for all that.
+
+V 0.33
+
+Pause/break is an alias for control-NUMLOCK if you ignore the E1 prefix.
+
+Removed the key sequences for changing video mode.
+
+To use midnight commander (mc) you need to issue the command "LANG=C". The default is LANG=(UTF-8)
+which will show strange characters instead of line drawing symbols. The function keys don't work
+in mc. You'll need a special terminfo file for that.
+
+The F1-F4 function keys are sending the wrong codes. They need to send ESC-O-P through ESC-O-Q (letter oh).
+When they're modified they send CSI-1;2P etc.
+
+The bug was in the nethack keypad navigation mode code. We were jumping to the wrong place when
+the key pressed was not on the keypad. It seems to be all better now. I'm going to play a whole game
+just to be sure (grin). Then I'm going to test mc (midnight commander). 
+
+We're at 1946 words. Less than 100 instructions left before we're out of ROM.
+
+Supporting VT100 line drawing characters
+
+CSI-11-m now sets the VT100 graphics font. The only character we support right now is "q", the horizontal line,
+which is needed for nethack. The others are mapped properly by the default "ansi" terminfo file.
+CSI-10-m resets the font to normal. 
+
+Adding the rest of the VT100 graphics characters will basically use up all of my remaining ROM space.
+We're at 1982 words with just the basic line drawing symbols, leaving us 42 instructions for bug fixes
+and necessary features. We don't even support ESC-(-B and ESC-)-B to select the font. We're definitely not
+going to be able to support all the video modes. I'm going to comment out the code.
+
+CSI#X now erases ahead # characters (including the current character). Needed for nethack with curses support.
+
+
+nethack doesn't work. it fails in a spectacular manner. I'm not remotely sure what's going on with it.
+It hangs onto the terminal resource even after agetty is killed. 
+
+The cursor is now visible even when the HIDDEN attribute is set. To hide the cursor
+you can set the foreground and background colors the same, print a character, and
+then print a backspace. Viola! No cursor. This is a feature.
+
+Linux update: for job control, use the command:
+"sudo setsid agetty -L ttyUSB1 115200 ansi"
+This fixes "man", CTRL-C now works, etc.
+
+ESC-7 saves the cursor position and attributes.
+ESC-8 restores the previously saved cursor position and attributes. Defaults to
+upper left corner black on white if no position was previously saved. These are
+used by the linux "resize" command, which we now support (you're still better off
+using "stty cols 120 rows 67")
+
+I'm thinking about ripping out the display modes completely, or just making them
+a compile time option instead of a run time option. I'm not sure I have enough ROM
+space to code for them. I would rather have support for the keyboard LEDs. Here's an idea:
+I could have a completely separate ROM image for each video mode. They would be the same
+except for the constants defining the screen dimensions and addresses. ooh. clever boy.
+I'm not sure how debugging would work. 
+
+Changed the version number to 1.0. 
+
+backspace should go the the previous line.
+
+Added nethack mode. Control-numlock toggles it. In nethack mode the numeric keypad is programmed to
+perform nethack navigation.
+
+shift-pause/break now resets the terminal. 
+
+V 0.32
+
+We're at 1875 words.
+
+Insert line CSI-L now works but it doesn't take a parameter.
+
+Xemacs works but vim falls down when scrolling.
+
+CSI-#-b now repeats the last printed character # times (default once). Nano now works beautifully using
+the standard ANSI terminfo entry. Except for shift arrow keys. I'm not sure what's up with that.
+
+The keyboard sends an extended left shift code when numlock is set. We now ignore extended left shift codes.
+This fixes the problem with extended modifiers.
+
+V 0.31
+
+We exceeded 2048 words so I removed the splash screen. Now we're back down to 1804.
+
+The extended modifier codes now work correctly with all the editing keys (home, insert, delete, pgup, pddn, end)
+and sort of work with the arrow keys... except shift-ARROW keys. Shift numeric keypad arrow keys work correctly,
+but shift main arrow keys show the numlock state instead of the shift state.
+Yes, it's bizarre, and I have no clue yet.
+
+The extended modifier codes are now passed with the function keys. 
+The numlock keypad dead key (5) now sends CSI-E.
+
+The shift key is supposed to temporarily cancel numlock mode but it doesn't yet.
+
+The right control and right alt keys now work properly. 
+
+shift tab now sends CSI-Z to the host.
+
+ESC[y;xh now clips to the right and bottom edges instead of doing nothing if you move past them.
+ESC[#d now sets the row. ESC[#G now sets the column.
+
+Forward and backward tab (CSI-I and CSI-Z) now accept parameters.
+
+Added SGR0 to the terminfo file. This fixed nano.
+
+Control-backspace now sends delete (ASCII 127). 
+Delete key now sends CSI-3~.
+Pressing the alt key sets the high bit of ASCII codes 0-127, making it possible to
+type any character value from 0-255. 
+
+Shift-numlock toggles debug mode. Control codes are displayed as special symbols
+and are not processed.
+
+Linux update:
+Use the command "stty cols 120 rows 67".
+Use the command ". ./ls_colors". 
+The preceding dot forces the script to be run in the current process, not a child process.
+The shell ls and ll commands look nice now. There's a little weirdness because the color of the cursor can
+be non-white under certain conditions. Not sure what to do about that if anything.
+The resize command says it's getting a bad character. Am I trashing s4?
+The setterm command is useful. 
+
+V 0.30
+
+We're at 1869 words.
+
+Changed the CGROM to single ported from double ported. It did not clear up my warnings. It does work though.
+
+CSI 27m now clears inverse video mode.
+CSI 22m now clears boldface mode
+CSI 25m now clears blink mode
+CSI 28m now clears hidden mode
+SGR set color in local echo mode no longer trashes s4 and sends the wrong code to the host.
+
+Inverse video now works properly in combination with other attributes.
+
+Backtab CSI-Z now works (no parameter yet).
+Tab CSI-I needs to accept a parameter also.
+
+Removed a "NOT" term from the font address calculation (Xilinx endian kluge). The source directory
+now contains alternate font files which can be used. You can replace "CGROM.vhd" with any of
+the following:
+CGROM-straight-850	this is an IBM codepage 850 font, standard on the European model of the IBM PC
+CGROM-straight-437	this is an IBM codepage 437 font, standard on the USA model of the IBM PC
+These other fonts are also available to be converted (they're all from FreeBSD syscons). Email me if you want them.
+
+cp437-thin
+cp850-thin
+codepage 866 is a Cyrillic font that contains the cp437 line drawing characters
+codepage 866u is the Ukrainian variant of the Cyrillic font?
+codepage 865 is for Nordic languages
+codepage 1251 is for Cyrillic and does not have line drawing characters.
+KOI8-R is for Russian
+KOI8-U is for Ukrainian
+armscii is for Armenian
+iso 8859-1 (latin 1).
+iso-2 (latin 2- Polish, Czech, etc.)
+iso-4 (latin 4- Latvian, Estonian, etc.)
+iso-5 (cyrillic)
+iso-7 (greek)
+iso-8 (Hebrew)
+iso-15 Latin 1 with revisions including Euro sign
+haik8	I don't know what this one is. it has symbols for some kind of alphabet with upper and lower case. if you know what it is please email me. Google was no help.
+swiss this is cp437 font with a slightly more rounded typeface.
+
+Delete line (CSI-G) now works. It does not yet take a parameter.
+
+CHAR_PER_LINE is now a variable instead of a constant (default is still 120)
+
+Reset (ESC-c) is now safer to use. It no longer wastes part of the hardware call stack
+so it can be called as many times as needed.
+
+Typing past the end of the screen no longer goes into hyperspace, although something weird can
+happen if you use the test pattern near the bottom of the screen in exactly the wrong way. I
+haven't been able to reproduce it.
+
+
+When the terminal receives an ENQ (ctrl-E) it responds with an ACK (ctrl-F). 
+
+We can send two screen clear commands and not breach the FIFO. If we send three we
+lose characters as expected.
+
+Added support for Eighty mode. It's unreliable of course, but hitting
+alt-scroll_lock toggles the mode.
+
+Added support for TALL mode. You can toggle the TALL bit by pressing
+control-scroll_lock. The display will shift between 67 and 33 lines. 
+The rest of the software still thinks you have 67 lines though, so your
+cursor can disappear off the bottom of the visible area.
+
+IMHO the TALL aspect ratio looks really nice.
+
+Removed a couple of 1-bit latches that were created by the FIFO state machine.
+
+Changed the color palette to constant (from signal). This eliminated some Xilinx warnings.
+
+V 0.29
+
+Fixed the FIFO. The software was wrong and the state machine was running at half speed thus causing
+first no characters and then double characters. We have completed the FIFO check successfully with
+no characters lost after a clear screen operation. The actual write depth of the FIFO is 66 bytes (plus
+the 16 byte FIFO built into the UART primitive). We can send two (or more) screen clears in a row and
+still not lose any characters at 115200 baud.
+
+Tweak. We're back to 1920 pixels wide. It seems my test monitor will tell you exactly how many pixels it's
+being fed, which is pretty convenient.
+
+Chipscope is turning out to be a pain in the ass. It takes forever to build in. And there is no way I could
+have solved my FIFO problem without it, so god bless chipscope.
+
+V 0.28
+
+The new UART receive FIFO is NOT in fact working.
+
+It seems we are only generating 1918 pixels per line instead of 1920. 
+
+You now have to press shift-scroll-lock to toggle between normal and local echo mode. It was
+too easy to hit accidentally without requiring the shift key. 
+
+Added support for control-G (0x07) BEL. We now have a visual bell that flashes the screen (inverted)
+for 100ms, which is way too long for our FIFO. We might have to do the bell in hardware
+instead of software. Maybe I should generate audio from the headphone jack.
+
+Cleaned up the code a little bit. We're back down to 1712 instructions. Woo.
+
+
+V 0.27
+
+We're at 1735 instruction words. Just over 300 instructions before I have to stop adding features. Unless I remove the splash screen. 
+I could shave a few words by converting CALL/RETURNS to JUMPs.  There's some deadwood testing code that could be removed too (like hex conversions).
+Plenty of room to finish the job.
+
+We now support CSI-6n "report cursor position. The response (which is not echoed locally no matter what the state of the
+scroll lock) is in the form CSI-v;hR where v is the vertical position and h is the horizontal position (origin is 1,1).
+
+We now support CSI-39m and CSI-49m to reset the foreground and background colors to their defaults (respectively).
+
+We now support CSI-8m which sets the foreground color so it matches the background color (hidden text).
+
+Removed the automatic CR/LF function. Got the thing working with agetty under Ubuntu just like a real terminal!
+It shows up as /dev/ttyUSB1 (USB0 is the JTAG interface) assuming you have no other USB serial devices attached.
+The command in Ubuntu was "sudo agetty -L ttyUSB1 115200 ansi". I'm working on a terminfo file which will match
+the terminal capabilities more closely, but it works! Typing "ll" gets you a colored directory listing and everything,
+and you can use the "nano" full screen text editor although it thinks you have an 80x24 display. Once I get the terminfo
+updated I will experiment with the nano editor and with nethack. If I can edit files, use a shell, and play games then
+I have succeeded, although I would like to experiment with the "screen" program to get multiple windows running.
+
+Insert characters is now working. CSI-#-@ (or CSI-@) inserts blanks under the cursor and shifts the line to the right.
+
+Delete characters (CSI-#-P) is now fixed and behaves correctly per comparison with Ubuntu xterm. There ought to be a "delete backwards"
+command but there is not. You have to issue a backspace and then a delete.
+
+Scroll lock now toggles local echo. No LED support yet.
+
+The function keys and cursor move/editing keys now send sequences of the form "ESC [ # ~" per the xterm/putty standard. 
+If some of these are sent to the terminal  in local echo mode (like HOME, END, PGUP, and PGDN) they will do useful non-standard things.
+Home goes to the start of the current line. End goes to the last character of the current line. PgUp goes to the upper left origin. PgDn
+goes to the lower left corner.
+
+Added support for VT100 reset (ESC c). This does shorten the global call stack so don't do it too many times between
+hard resets or you'll get an unscheduled reset when you finally blow the stack limit. Tick tick tick.
+
+Added support for NUMLOCK. The numeric keypad can now be used as arrow keys etc. The LED doesn't work presently.
+
+V 0.26
+
+Added color bars to splash screen.
+
+Fixed the "7" key on the numeric keypad. It did nothing- I must have missed the scan code.
+Also fixed the keypad slash (divide). It turns out to be an extended key. I wonder what else we missed?
+
+
+Added a splash screen. We're still only at ~1500 instruction words. 
+
+The DELETE key now sends the RUBOUT code (0x7F). This is implemented as a destructive backspace.
+
+The DELETE function (ESC [ # P) is broken. It looks like it's calculating the line length incorrectly.
+
+We now send the "correct" (xterm terminfo entry) ESC sequences for the end, PgUp, and PgDn keys. They are
+ESC [ # ~ where # is 4,5, or 6.
+
+CSI-A and CSI-B (up and down) now take parameters.
+
+CSI-P now deletes one forward character, moving the remaining characters on the line forward and filling the last character
+with a blank in the current background color. CSI-n-P deletes n characters, where n is a decimal number. There is a bug
+if the line is "too long".
+
+We're at 1305 instruction words so far. Lots of room for a cool splash screen graphic.
+
+In HyperTerminal backspace is non-destructive and it does not wrap to the previous line, so I'm 0 for 2.
+
+I need to do boundary checking on the set cursor position command. 
+
+Adding TAB stop support will cost me 16 bytes of RAM. And nobody uses it. 
+
+Added support for single shift 2 SS2 (ESC-N) to print the next character literally even if it's a control character. This lets you access
+the first 32 symbols in the font. This is slightly non-standard.
+
+V 0.25
+
+OK, I've reverted the PS/2 keyboard support to the old version which uses IN pins instead of INOUT pins. It still
+generates a gated clock warning but it's nice and stable.
+
+CSI-1J now clears to the beginning of the screen. CSI-2J clears the screen and homes the cursor. CSI-0J (or CSI-J)
+clears to the end of the screen.
+
+There is a serious problem with the keyboard interface. We're definitely going to have to revert. It's easy to
+reproduce the problem: just hit ctrl-A a few times to generate a test pattern and then try to type something.
+
+Clearing the screen (form feed) blows past the input FIFO and loses 24 bytes, so adding a 64 byte FIFO should be
+sufficient as long as I don't support "insert line" or "delete line" (which are not supported by PuTTY, HyperTerminal,
+or ANSI.SYS?).
+
+Putty and Hyperterminal do not support insert line, insert char, delete char, etc.
+HT does not support reverse scroll CSI-T.
+Putty supports user defined TAB stops ESC-H but Hyperterminal does not.
+Neither one supports back TAB (CSI-Z). 
+
+CSI-f is now an alias for CSI-H (set cursor position).
+
+CSI-I now does a horizontal tab. Horizontal tabs are now non-destructive. Note that this
+should take a parameter for number of tabs and should (maybe?) stop at the end of the line (no wrap). If we
+don't wrap do we advance to the end of the line or merely to the last tab stop (which is 7 characters short
+of the end of the line). Have to do some experimenting. Wish I had an actual VT100 to play with.
+
+We no longer print NULLs as spaces. This means that unimplemented scan codes now do nothing.
+
+I want to buy a Canadian keyboard, but AliExpress doesn't have any.
+
+The PS/2 keyboard is erratic. I think I'm going to switch back to the original version of the PS/2
+hardware and figure out some other way to set the LEDs. 
+
+PS/2 TX hypothesis: it doesn't always see the clock assertion. maybe the period is too low.
+But why am I getting 0x01? Because it's transmitted LSB first and I'm only getting one bit plus
+a bunch of zeroes? Why was I getting ASCII 0x07? is the tx_idle bit working on a delay? tx_idle
+should also reset the ps2_rx state machine. maybe it does already.
+
+This keyboard has its own internal pullups. Worth checking though.
+
+V 0.24
+
+
+Added bidirectional support for the PS/2 keyboard. We can now turn the CAPS LOCK LED 
+on and off (more software support is needed). The timing is critical on this and I don't
+fully understand why. I'm concerned that it will not work on every keyboard. It was also possible
+once to confuse something (the ps2_tx state machine?) and end up with a locked keyboard, but I have
+not been able to reproduce it. Also, it doesn't work every time and it generates spurious characters
+so it definitely needs more work. The good news it that it works some of the time, which is new! I'm seeing
+the DE character (vertical bar) which means scan code 01 (F9). Maybe add parity checking?
+
+Removed the gated clock warnings. Removed the drive current conflict warnings.
+
+PgUp jumps to the upper left corner for convenience. It does not send any codes.
+PdDn jumps to the lower left corner for convenience. It does not send any codes.
+
+Clear to end of line works <ESC>[K (or <ESC>[0K)
+Clear to beginning of line works <ESC>[1K
+Clear current line works <ESC>[2K
+All other <ESC>[?K parameters clear the entire current line.
+
+I'm not sure what codes to send for the PgUp and PgDn keys. Hyperterminal intercepts them and uses them for scrollback.
+
+LF and CR/LF now work correctly on the last line using hardware scrolling. We should be able to keep up with
+115,200 baud now as long as we don't get a series of form feeds or clear to end of screen in a row. Can we handle one
+form feed? 10 instructions times 8040 = 80400 clocks versus byte fifo 16 * 2100 instructions per byte = 33600 clocks.
+So, no. We're going to lose characters after a form feed at full tilt boogie. We're going to need that FIFO. 
+
+Down arrow now stops at the bottom of the screen instead of wrapping.
+
+V 0.23
+
+Added a hardware offset register for scrolling. Untested. You write an offset address (high and low) to
+two ports on the Picoblaze and it's stored in a register and added to the cursor address during RAM
+access. It's also added within the VGA process when calculating character addresses.
+
+Cleaned up the Picoblaze memory map.
+
+TAB now works (ctrl-i, 0x09). It fills with spaces. I'm not sure if that's the correct behavior.
+
+Changed baud rate divisor to get 19200 baud temporarily (back to 115200 now). Found a Microsoft bug, so we can't use C for our test suite.
+I can use Pablodraw to create test files and transmit them using HypterTerminal. I need to either save as text format or strip the extra crap off the end
+of the .ANS files. There are 8*16 bytes of trailing data at the end of the ANS files.
+
+V 0.22
+
+Fixed the problem with the first column of pixels. I had to suppress the display of the first column
+entirely. It wasn't that the data was wrong (it was)- it's that the column should not have been displayed at all.
+Need to make sure there is no problem with the last column of pixels.
+
+V 0.21
+
+
+Cursor is hard to see on lowercase j. 
+
+We're in feature splatter mode right now. Too many unfinished features and we keep partially implementing new ones.
+
+Removed two of the gated clock warnings. Tried to remove the others but the design did not work
+correctly so there's a timing problem on BRAM writes.
+
+Shortened the scroll up loop from 19 to 17 instructions per character.
+
+Move right now supports a count parameter.
+Move left now supports a count parameter.
+
+ESC[J clears the whole screen even when it's just supposed to clear to the end of screen.
+Need to check the parameter.
+
+Cursor positioning now works with zero, one, or two parameters.
+
+Setting foreground color works.
+Setting background color works.
+Setting bold works (sets high bit of foreground color).
+Setting blink works (sets high bit of background color).
+Setting inverse video works (setting colors while in inverse video mode may have the wrong effect).
+
+Changed the default foreground color to standard white (0x07) instead of bright white (0x0F). We might 
+want to tweak the color LUT for a slightly brighter standard white.
+
+V 0.20
+
+Cursor positioning now works if both parameters are provided. It still needs to handle the case of a missing parameter (no semicolon).
+
+Added three bits for hardware modes. They're not active yet.
+
+We seem to be correctly parsing parameters into hex values. 
+
+V 0.19
+
+Arrow keys now send the correct escape/CSI sequences.
+
+ANSI now responds to the arrow key sequences properly. Does not yet take
+a count parameter.
+
+Added support for Home and End keys.
+
+
+I need to do CR/LF properly. Right now CR also does an LF.
+
+V 0.18
+
+Freed up the sB and sC registers for additional flags for escape code processing. Also freed up
+the RIGHT_ALT flag to use as the ESCAPE_FLAG
+
+Converted the PS/2 FIFO to FWFT mode. This saves a port address and a couple of instructions.
+Also increased the FIFO size to 64 bytes.
+
+Fixed two bugs with scroll up. We were using 80 column values instead of the CONSTANTs for 120 columns.
+
+We're up to 750 instructions so I increased the program ROM size to 2K words.
+
+Cleaned up the code with NAMEREG directives for readability.
+
+Added basic color support. We have a default color (COLOR_REG) and we preserve colors
+when scrolling, use the default color when clearing, and use the default color when
+writing characters. We currently do not have a way to set the default color so it's always
+0xF0 (bright white on black).
+
+The arrow keys no longer move past the edges of the screen.
+
+V 0.17
+
+
+The color attribute hardware is working (haven't tested read port yet). No support for the 9th bit yet.
+
+I could munge the font differently and remove the NOT term from the VGA generator.
+
+Fixed a bug: if we print past the end of the screen we now automatically scroll up. A CR/LF is
+not necessary.
+
+Fixed the second column of pixels- it was coming from the first character of the next line.
+*The first column of pixels now comes from the fifteenth/sixteenth column of pixels for some reason. This
+only matters for one character in our CP437 character set, the vertical right block character 0xDE. I could redefine
+the FF character as a DE without the far column of pixels and fix this in software (substituting FF for DE
+when I'm in column zero). I'd rather fix it properly though. I'd like to keep massive kluges to a
+minimum since I'm planning to release the source code eventually. Also... ugly. Breathtaking in its inelegance.
+Maybe I should do it just for that reason? It is a mixed hardware software project after all. My favorite kind.
+
+I still need to do the FWFT FIFO change.
+
+
+Changed the background color to black to get rid of the half line at the bottom of the screen.
+
+Increased display to 120x67. 
+
+*Changed the code to support 120 character lines. We do have a problem with the divide fuction- right now
+it's hard coded for 120.
+
+
+V 0.16
+
+Caps lock is working. There is no visual indication of the caps lock state right now.
+
+We now have a code page 437 IBM PC font (8x8). 
+
+Pressing the F4 key currently dumps a full set of 256 characters (raw) at the current cursor position.
+
+CGRAM is now 8K.
+
+This will let me display 67 lines of 120 characters each.
+I'm going for a 66 line display plus a status line. There's actually enough RAM for 68 lines but there
+are not enough vertical pixels for more than 67.5. I suppose if I had block graphics I could take advantage
+of a final half line of graphics characters. Or the final status line could be 8 pixels high instead of 16.
+Hmmm.... 
+
+We need to check every key and make sure it is sending the right stuff. This means
+going into linux and using the ncurses library and/or stty raw. Or maybe just trust that
+PuTTY got it right and use that.
+
+The monitor identifies my signal as 1920x1080 60hz DVI. 
+
+OK cool: we halved the VGA/HDMI clocks and now the monitor sees it as 1920x1080 30hz DVI. The only other change
+was to the cursor blink rate (we now use bit 4 of the frame counter instead of bit 5). 
+Xilinx no longer complains that we don't make timing now that we have 75mhz pixels instead of 150mhz pixels.
+
+It will be interesting to see if this works on the old 768 line plasma screen.
+
+V 0.15
+
+Shift keys and control keys (and the few combinations of both) now work.
+
+Offset the active area of the display by 112 pixels (roughly centering the 80x50 zone).
+
+Form feed (^L) now clears the screen and puts the cursor at the top left.
+
+
+
+V 0.14
+
+Fixed various Xilinx warnings. Removed a bunch of 1-bit-latch signals.
+
+Added the PS2 FIFO and port back in. Video glitch is gone.
+
+Changed the FIFO from block memory to distributed memory. Need to convert it to
+a FWFT FIFO so I don't have to do the funky read strobe code with a split port
+address. Also, now we're getting a bunch of warnings about internal signals in the FIFO.
+
+You can now type lower case (unshifted) ASCII characters.
+
+V 0.13
+
+Bad release. Somewhere in here while trying to fix the PS2 FIFO I got a messed up display
+so I backed up a version.
+
+V 0.12
+
+Carriage return now scroll the entire screen up by one line and puts a blank line at the bottom of the
+screen when the end of screen is reached.
+
+V 0.11
+
+Increased the display size to 4K bytes (80x50). Used Xilinx IP Core to create the memory. Removed color bars and test pattern. 
+
+V 0.10
+
+The CGRAM is now readable from the PicoBlaze on input port 5. Pressing F1 from Pictoterm
+causes the Picoblaze to echo the first line of the display back to the PC.
+
+The arrow keys work in the terminal program. There is no boundary checking.
+
+
+*Note that it is not possible to program the flash memory if the FPGA has already been programmed.*
+This is because the JTAG hook for the Picoblaze interferes with the JTAG programming of the SPI flash.
+The solution is to cut the power causing the FPGA to lose its memory and then reconnect and flash.
+
+V0.9
+
+I have added a hardware cursor. It is a one pixel inverse video underline that blinks every 32 frames.
+
+V0.8
+
+The JTAG programming is working nicely. I'm able to modify the ROM, assemble it,
+and download it to the chip fairly quickly. 
+
+Typing a character in the PC terminal program (115200, 8N1) will echo that character to the CG display and advance the cursor by
+one position. Control codes are not interpreted- they are rendered literally (this is no backspace, carriage return, etc.) 
+
+Also, we have a bug in the CGRAM to pixel code. The first column of pixels in the first character on a line is taken from the
+character code for the beginning of the NEXT line. This only shows up if you begin one line with an inverse video character and
+the next line with a normal character (or vice versa). 
+
+The next step is to figure out how to reprogram the PicoBlaze via JTAG without rebuilding the entire FPGA.
+Following that we will hook the output ports of the PicoBlaze up to the CGRAM so that we can write an address
+and a data byte to the display memory (and increment the address) each time a character is received. In short,
+we will have a TV typewriter. It will not be a full terminal until we can teach it to scroll at the end of the screen
+which is going to require READING the CGRAM as well as writing to it.
+
+
+V 0.7
+
+This version contains a PicoBlaze-6 microprocessor running at 50mhz and a UART that is connected to the Pipistrello's USB to serial
+converter. It is configured for JTAG programming so it should (?) be possible to update the firmware without resynthesizing the entire
+design. The PicoBlaze is configured for 1K x 18 bits of program ROM and 64 bytes of scratchpad memory.
+
+Note that the UART communications were wonky using HyperTerm but they work perfectly using the Xilinx supplied PicoTerm application for Windows.
+
+OK, I've decided to use the PicoBlaze-6. It supports up to 2K of 18-bit instructions and has up to 256 bytes of scratchpad memory.
+More importantly, it comes with example VHDL code for UART transmit and receive hardware and a sample echo back program written
+in assembly language. 
+
+
+V 0.6
+
+The next step is to wire up a microprocessor so I can write to the display memory. This is more complicated than it sounds.
+
+The display now shows a proper test pattern with the full 256 character set and a "Hello, World." message. It turns out that VHDL
+reads hex strings in wrong-endian order when initializing memory. This means that each 32 byte hex string in my CGRAM and CGROM
+was converted to binary in reverse order. I fixed the CGROM address by inverting the lower 5 bits. I fixed the CGRAM splash screen
+by putting the characters in the strings in reverse order. I could not get it to read the initialization data from a binary file. Apparently
+it takes some kind of hex file but there don't appear to be any examples floating around.
+
+There is a lower level of VHDL which lets you specify individual gates instead of letting the synthesizer pick them for you. There is also 
+a higher level of VHDL for doing things like iteratively creating structures and data at synthesis time. I'm in the middle right now.
+
+I did look at some Verilog code. Wow, it looks much simpler. I'm going to stick with VHDL for now. 
+
+I'm having trouble deciding which microprocessor to use. The picoBlaze is just a little bit too small. The microBlaze seems to be pretty complex,
+but I'm only using 3% of my Spartan-6 so far so maybe I can afford it. 
+
+There is no decent PIC18F core that I've found. It would have been convenient but even the PIC18C and PIC16 cores I've found do not contain a full
+set of on-chip peripherals and such. Only 35 instructions to implement.
+
+Then there are two different Z80 implementations I'm considering. One is timing compatible with the original chip. This is great for games and things
+that are timing critical but I'm more interested in performance. Another one runs much faster (NextZ80) but it doesn't fully implement all of the 
+undocumented register flags.
+
+Nobody appears to have implemented a Z180 core, which is a shame as it would allow me to address additional memory. 
+
+I could go with an 8086 with the eventual goal of emulating an entire IBM-PC but that seems like an awful lot of work what with the DMA and
+interrupt controller chips and what not. We could certainly get MS-DOS running but any software that talked directly to the hardware would 
+not work properly without a huge amount of work. And really if you're going to go to that much trouble you're going to want an 80386 so you
+can run real software. So why not add floating point and emulate an 80486 so you can run current versions of the linux kernel? I think I'll
+stick with a Z80.
+
+FPGAs do not generally support internal tri-state logic. Hence the need for separate read and write data buses for memory.
+
+V 0.5
+
+We now have an 80x24 character display which reads characters from the CGRAM entity, looks up the font bit patterns in
+the CGROM entity, and presents a stable display. It still shows color bars and test patterns on the bottom half of the screen.
+The character display is black and white but it's centered between two blue margins.
+

@@ -1,0 +1,91 @@
+
+Open issues:
+
+I could make the cursor "invisible" by just moving it past the end of the screen when I'm not using it. No need for special hardware. You might catch a glimpse of it
+occasionally while doing a screen clear or some other hypothetical block copy operation. 
+
+Backspace currently goes to the end of the previous line if you're in column 0. Not sure if this is desirable and/or should be mode optional.
+
+Added three bits for hardware video modes. The pixel_eighty bit sets 80 columns centered. The pixel_fifty bit sets 50 row centered.
+The pixel_tall bit sets 33/25 lines instead of 67/50. Note that the last line of 33 column mode is going to be a half line- it's
+actually 33.5 line mode. These three bits are set using port 0x0B, write only. Bit 0=tall, 1=80, 2=50. There's currently no way
+to set the background color. I may allow any of the 16 predefined colors. This could be set easily within port 0x0B and still leave
+me an extra configuration bit, maybe to turn the cursor off. If I only allow 8 colors I could also have a bit to make a block cursor.
+Or I could just have a cursor control port.
+
+Color edges might be one pixel column off.
+
+The return key currently sends CR/LF to the host as a convenience during debugging with PuTTY.
+
+There is a bug with the right control and alt keys. It takes two keypresses to activate them.
+
+Maybe change the name of the source file from uart_control.psm to something more descriptive?
+This means changing the Xilinx design too so the ROM file gets found.
+
+The problem with the first column of pixels is not where I've been looking for it. The problem is that it's not the first column
+of pixels. It's the first column minus one. I need to suppress the display of this column entirely, not just get it to show the "right"
+thing. I'm assuming this can be done by manipulating the blanking flag, but I'm not sure if I need to do it for one pixel or two.
+I thought I was going to have to use the simulator to find this one. OK, it's fixed. Need to check the behavior of the right edge. I
+may need to add a pixel there.
+
+Set the keyboard LEDs.
+Support numlock and modifiers on the numeric keypad.
+Support international characters on the keyboard using the Microsoft word control prefix dead keys. This is going to take
+a couple of hundred instructions so it might not be in the memory budget.
+
+Supporting additional escape codes.
+Supporting additional keyboard sequences.
+
+Maybe add a setup option:
+1. default colors foreground and background
+2. local echo mode
+3. hex loopback mode
+4. display mode (120/80, 67/50,33/25)
+5. border color 0-15
+6. cursor style (block/underline/bar?)
+
+It takes 17 instructions to move each character on the screen to the previous line. There are 8040
+characters at the largest screen size, so a scroll up takes 136,680 instructions plus overhead.
+At 115,200 baud we get 15,200 characters per second, which means 25,000,000/15,200= 2170 instructions per character
+the UART FIFO is only 16 bytes (34,720 instructions), so we're going to have to add a supplementary FIFO because we need to buffer
+62 characters to handle an entire scrolling event. Either that or we're going to have to reduce the baud rate
+to 19200 (38400 is too fast). A clear screen event is slightly faster (). Update: we now have hardware scrolling using an
+address offset register. We still lose 24 bytes past the end of the FIFO when we do a clear screen operation, so at some point
+we're going to need another 64 byte FIFO. 
+
+I could make the loop smaller by adding some hardware- an auto increment to the cursor address and an alternate
+cursor address register (source address & destination address). This would remove four OUTPUTs and two ADDs and 
+would still not be enough to run at 115,200 without loss.
+
+Combine the above with a 16 bit char/attr copy register, a port value for "read 16 bits into register and increment A" and
+a port for "write 16 bits from register and increment B" and I'd be down to the following 7 instructions:
+
+OUTPUT sX, read&increment
+OUTPUT sX, write&increment
+ADD
+ADDCY
+COMPARE
+COMPARECY
+JUMP
+
+
+
+I could crank up the PicoBlaze to 100mHz. This would still not be enough.
+
+Another solution would be a scroll register that set the starting address of the looping frame buffer. This would
+make all the code more complex, especially wrapping at the end of memory. We'd almost have to reserve 128 bytes per line
+which would limit us to 64 lines exactly. Eight characters on each line would be invisible off the right edge of the screen.
+We would no longer need the divide function because we could do it all with shifts. Divide by 128 would still take 7 instructions.
+Supporting 80 column mode would be slightly more complex.
+
+I could do a hardware scroller like a DMA controller that moves 16 bits (character and attribute) per cycle. Think of it as
+a character mode blitter engine. I kind of like the idea, but it still wouldn't be fast enough. (Would it?)
+
+Flow control on the serial port is an idea.
+
+It's major surgery no matter how you slice it unless I just cap the baud rate at 19,200.
+
+The easiest solution is an extra FIFO. I can make it as large as I want using distributed RAM.
+
+An even easier solution is to create a TermInfo database entry which has the appropriate padding
+in milliseconds for scrolling and clearing operations. 

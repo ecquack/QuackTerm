@@ -1,0 +1,445 @@
+;
+; Erik C. Quackenbush erikcq@quackenbush.com
+; this is a simple terminal emulation program.
+;
+; arrow keys
+; these are the key codes sent by Xilinx PicoTerm
+; they are not the same as the key sequences sent by HyperTerminal,
+; which sends complete ANSI escape sequences instead of high bit codes.
+
+	CONSTANT backspace_key,	08
+	CONSTANT return_key,	0D
+
+	CONSTANT home_key,	82
+	CONSTANT end_key,	83
+	CONSTANT pgup_key,	84
+	CONSTANT pgdn_key,	85
+	CONSTANT insert_key,	86
+	CONSTANT delete_key,	87
+	CONSTANT left_key,	88
+	CONSTANT right_key,	89
+	CONSTANT down_key,	8A
+	CONSTANT up_key,	8B
+
+	CONSTANT F1_key,	91
+	CONSTANT F2_key,	92
+	CONSTANT F3_key,	93
+	CONSTANT F4_key,	94
+	CONSTANT F5_key,	95
+	CONSTANT F6_key,	96
+	CONSTANT F7_key,	97
+	CONSTANT F8_key,	98
+	CONSTANT F9_key,	99
+	CONSTANT F10_key,	9A
+	CONSTANT F11_key,	9B
+	CONSTANT F12_key,	9C
+
+	CONSTANT shift_F1_key,	A1
+	CONSTANT shift_F2_key,	A2
+	CONSTANT shift_F3_key,	A3
+	CONSTANT shift_F4_key,	A4
+	CONSTANT shift_F5_key,	A5
+	CONSTANT shift_F6_key,	A6
+	CONSTANT shift_F7_key,	A7
+	CONSTANT shift_F8_key,	A8
+	CONSTANT shift_F9_key,	A9
+	CONSTANT shift_F10_key,	AA
+	CONSTANT shift_F11_key,	AB
+	CONSTANT shift_F12_key,	AC
+
+	CONSTANT ESC_key,	1B
+
+; shift-F1 is A1. 
+; alt-F1 is C1. alt overrides shift
+; ctrl-F1 is B1. control overrides alt and shift
+;
+; Copyright (c) 2017 Erik C. Quackenbush erikcq@quackenbush.com
+;
+; this Picoblaze-6 program implements a simple dumb terminal which talks to a host over the USB to serial 
+; converter and generates an HDMI 80x50 character display.
+;
+;
+                    ;
+                    ; A delay of 1 second is implemented which is intended to give time for all the hardware
+                    ; to settle into a stable condition before starting to doing anything. This can be
+                    ; particularly beneficial when dealing with long cables where serial lines can take some
+                    ; time to reach the initial idle state following power being applied.
+                    ;
+        cold_start: CALL delay_1s                   ;
+                    ;
+                    CALL reset_UART_macros          ;Reset buffers in UART macros
+                    ;
+                    ;
+                    ; Initialised terminal display and display welcome messages
+                    ;
+                    ;
+                    
+		;	CALL div_test
+;
+                    ;------------------------------------------------------------------------------------------
+                    ; Main Program
+                    ;------------------------------------------------------------------------------------------
+
+		;
+		CONSTANT MSB_PORT,		02	; write the MSB of the cursor position here
+		CONSTANT LSB_PORT,		03	; write the LSB of the cursor position here
+		CONSTANT CHAR_PORT,		04	; write the character value here
+		CONSTANT CHAR_READ_PORT,	05	; read the character value here
+
+		CONSTANT PS2_READ_PORT,		06
+		CONSTANT PS2_STATUS_PORT,	07	; bit(0) is empty, bit(1) is full
+		CONSTANT PS2_FIFO_PORT,		08	; reading from this pulses the FIFO read strobe
+
+		;	NAMEREG	sE, CHAR_ROW 	
+		;	NAMEREG sF, CHAR_COLUMN
+		; tv_test sends a few characters to the CGRAM.
+		;
+	tv_test:	LOAD 	sA, 00
+			LOAD	sB, 00			; set initial character position to 0x000
+			;LOAD	CHAR_ROW, 00
+			;LOAD	CHAR_COLUMN, 00
+			CALL	set_cursor
+
+			LOAD	s8,hello_msg'upper
+			LOAD	s9,hello_msg'lower
+			CALL	print_string
+
+			LOAD	s5,"Q"
+			CALL	send_next
+			LOAD	s5,"U"
+			CALL	send_next
+			LOAD	s5,"A"
+			CALL	send_next
+			LOAD	s5,"C"
+			CALL	send_next
+			LOAD	s5,"K"
+			CALL	send_next
+
+			LOAD	s5, CR
+			CALL	UART_TX
+			LOAD	s5, ">"
+			CALL	UART_TX
+
+;
+; OK, we've sent our welcome message to the screen. Now we loop processing characters from the
+; UART and PS/2 ports.
+;
+
+
+	echo_loop:
+			CALL 	PS2CHECK
+			CALL	UART_RX                 ;wait for a character and return in s5
+ 	                JUMP Z, echo_loop		;continue to wait if timeout occurs
+			CALL	send_next
+			COMPARE	s5, CR
+			JUMP	NZ, echo_NO_CR
+			CALL	UART_TX
+	echo_NO_CR:	LOAD	s4,s5
+			CALL	hex_byte
+			LOAD	s5," "
+			CALL	UART_TX
+			JUMP	echo_loop
+
+
+			; set_cursor
+			; sets the cursor address for the HDMI character display to sAsB
+			; returns without affecting any registers
+			;
+	set_cursor:	OUTPUT 	sA, MSB_PORT		; set MSB of address
+			OUTPUT	sB, LSB_PORT		; set LSB of address
+			RETURN
+
+	; alternate set_cursor for scrolling
+	set_cursor_CD:	OUTPUT 	sC, MSB_PORT		; set MSB of address
+			OUTPUT	sD, LSB_PORT		; set LSB of address
+			RETURN
+
+	PS2CHECK:	INPUT	s4, PS2_STATUS_PORT	; read PS/2 status byte
+			AND	s4, 01			; check low bit
+			RETURN	NZ			; empty FIFO
+			LOAD	s5, "{"
+			CALL	UART_TX
+			INPUT	s4, PS2_STATUS_PORT
+			CALL	hex_byte
+			INPUT	s4, PS2_FIFO_PORT	; read pulse the FIFO
+			CALL	send_SPC
+			INPUT	s4, PS2_READ_PORT	; read PS/2 scan code byte
+			CALL	hex_byte
+			CALL	send_SPC
+			INPUT	s4, PS2_STATUS_PORT
+			CALL	hex_byte
+			LOAD	s5, "}"
+			CALL	UART_TX
+			CALL	send_CR
+			RETURN
+	empty_fifo:	LOAD	s5,"{"
+			CALL	UART_TX
+			INPUT	s4,PS2_READ_PORT
+			CALL	hex_byte
+			CALL	send_SPC
+
+
+	send_next:	
+			COMPARE s5, BS 			; control-h is backspace
+			JUMP 	Z, backspace
+			COMPARE s5, CR			; carriage return 0x0D ctrl-m
+			JUMP 	Z, carriage_return
+			COMPARE	s5, LF			; line feed 0x0A ctrl-j
+			JUMP 	Z, line_feed
+			COMPARE s5, down_key
+			JUMP 	Z, line_feed
+			COMPARE s5, up_key
+			JUMP 	Z,	vertical_tab
+			COMPARE s5, left_key
+			JUMP 	Z,	left_cursor
+			COMPARE s5, right_key
+			JUMP 	Z,	right_cursor
+			COMPARE s5, F1_key
+			JUMP 	Z,	function_1
+			COMPARE s5, F2_key
+			JUMP 	Z, function_2
+			COMPARE s5, F3_key
+			JUMP	Z, function_3
+
+			OUTPUT s5, CHAR_PORT
+	increment_char:	ADD	sB, 01			;
+			ADDCY	sA, 00			; 16 bit increment (we do no range checking. addresses will wrap at 2047 to 0)
+			CALL	set_cursor
+			RETURN
+
+	backspace:	SUB	sB, 01
+			SUBCY   sA, 00			; 16 bit decrement (we do no range checking here. addresses will wrap from 0 to 2047)
+			CALL	set_cursor
+			LOAD	s4, 00
+			OUTPUT	s4, CHAR_PORT
+			RETURN	
+
+	left_cursor:	SUB	sB, 01
+			SUBCY	sA, 00
+			CALL	set_cursor
+			RETURN
+
+	right_cursor:	ADD	sB, 01
+			ADDCY	sA, 00
+			CALL	set_cursor
+			RETURN
+
+	vertical_tab:	SUB	sB, 50			; move the cursor up one line
+			SUBCY	sA, 00
+			CALL	set_cursor
+			RETURN
+
+	line_feed:	ADD	sB, 50 			; 0x50 = 80 decimal, the number of characters per line. this could change!!!
+			ADDCY	sA, 00			; move the cursor down one line
+			CALL	set_cursor
+			RETURN	
+
+			; carriage_return does not currently check for end of screen and scroll up a line. it just wraps badly on the 2048 boundary
+			;
+
+	carriage_return:
+
+			LOAD	s2, sB
+			LOAD	s3, sA
+			CALL	divide_16bit_by_80
+			COMPARE	sE,00			; are we on the left edge? 
+			JUMP 	Z, cr_leftedge
+			SUB	sB, sE			; no, subtract the remainder to put us at the left edge
+			SUBCY	sA, 00
+;			JUMP	cr_regadjust
+	cr_leftedge:	ADD	sB,50			; add 80 characters
+			ADDCY	sA,00
+
+			COMPARE	sB, A0			; are we past the end? FA0 = 4000 decimal
+			COMPARECY sA, 0F
+
+			JUMP	Z, scroll_up
+
+	cr_regadjust:	CALL	set_cursor
+			RETURN
+
+	scroll_up:	LOAD	sB, 50			; copying from 0x0050
+			LOAD	sA, 00
+			LOAD	sC, 00			; copying to 0x0000
+			LOAD	sD, 00
+	scroll_loop:	CALL	set_cursor
+			INPUT	s5, CHAR_READ_PORT
+			CALL	set_cursor_CD
+			OUTPUT	s5, 04
+			ADD	sB, 01
+			ADDCY	sA, 00
+			ADD	sD, 01
+			ADDCY	sC, 00
+			COMPARE sB, A0
+			COMPARECY sA,0F
+			JUMP	NZ, scroll_loop
+	clear_last_line:LOAD	sB, 50
+			LOAD	sA, 0F
+			LOAD	s5, 00
+	clear_loop:	call	set_cursor
+			OUTPUT	s5, 04
+			ADD	sB, 01
+			ADDCY	sA, 00
+			COMPARE	sB, A0
+			COMPARECY sA, 0F
+			JUMP	NZ, clear_loop
+			
+	done_scrolling:	LOAD	sB, 50
+			LOAD	sA, 0F
+			CALL	set_cursor
+			RETURN
+
+	function_3:
+			LOAD	s5, CR
+			CALL	UART_TX
+	key_scan:	LOAD	s5, "["
+			CALL	UART_TX
+			INPUT	s4, PS2_STATUS_PORT
+			CALL	hex_byte
+			LOAD	s5," "
+			CALL	UART_TX
+			INPUT	s4, PS2_READ_PORT
+			CALL	hex_byte
+			LOAD	s5," "
+			CALL	UART_TX
+			INPUT	s4, PS2_STATUS_PORT
+			CALL	hex_byte
+			LOAD	s5, "]"
+			CALL	UART_TX
+			RETURN
+
+	function_2:	JUMP	scroll_up		; F2 tests our scrolling function
+
+	function_1:	LOAD	sE,sA			; preserve our position
+			LOAD	sF, sB
+			CALL	send_CR			; start a new line in the terminal
+			LOAD	sD, 50			; dump 80 characters (0x50)
+			LOAD	sA, 00			; start at the top of the screen
+			LOAD	sB, 00
+	dump_loop:	CALL	set_cursor
+			INPUT	s5, 05			; read from the CGRAM output port
+			CALL	UART_TX
+			ADD	sB, 01			; increment cursor
+			ADDCY	sA, 00
+			SUB	sD, 01			; decrement counter
+			JUMP	NZ, dump_loop
+			LOAD	sA,sE			; restore our cursor position
+			LOAD	sB,sF
+			CALL	set_cursor
+			CALL	send_CR
+			RETURN
+
+			; print_string:
+			; sends NULL terminated STRING to the HDMI character display
+			; string pointer is passed in s8s9
+			; returns with s8s9 pointing to NUL terminator at end of string
+			; does not affect other registers
+	print_string:	CALL@ (s8, s9)
+                    	COMPARE s5, 00                  ;terminate on NUL character
+                    	RETURN Z
+			CALL send_next                  	
+                    	ADD s9, 1'd
+                    	ADDCY s8, 0'd
+                    	JUMP print_string
+
+			; hex_byte
+			; echo the 8 bit value of s4 to the serial port in hexadecimal 
+			; followed by a space (three characters total are sent)
+			; the s5 register is corrupted by this function
+     	hex_byte:	LOAD s5, s4                     ;isolate upper nibble
+			SR0 s5
+			SR0 s5
+			SR0 s5
+			SR0 s5
+			CALL hex_to_text               ; convert to ASCII
+			CALL UART_TX                    ;send upper digit to UART
+			LOAD s5, s4                     ;isolate lower nibble
+			AND s5, 0F
+			CALL hex_to_text               ; convert to ASCII
+			CALL UART_TX                    ;send lower digit to UART
+                	RETURN 
+
+			; Convert value 00 to 0F provided in 's5' into ASCII character in 's5'
+        	 	; Register used s5
+	hex_to_text:	SUB s5, 0A                      ;test if value is in range 0 to 9
+                    	JUMP C, number_to_char
+                    	ADD s5, 07                      ;ASCII char A to F in range 41 to 46
+	number_to_char:	ADD s5, 3A                      ;ASCII char 0 to 9 in range 30 to 40
+                    	RETURN 
+               
+
+			STRING hello$, "Hello, world. And now for something completely different!"
+
+	hello_msg:	LOAD&RETURN s5, hello$
+			;LOAD&RETURN s5, CR
+			LOAD&RETURN s5, NUL
+
+
+                    ;
+                    ; Divide 16-bit binary integer by 80
+                    ;
+                    ; The value to be divided by 80 should be provided in register set [s3,s2].
+                    ; The routine will return the integer result [s3,s2]/80 back in[s3,s2]
+                    ; with any remainder in register sE.
+                    ; Registers used s0,s2,s3,s8,s9,sE,sF
+
+
+divide_16bit_by_80:	LOAD sE, s2                     ;copy input value into [sB,sA]
+                   	LOAD sF, s3
+                   	LOAD s2, 00                     ;clear division result
+                   	LOAD s3, 00
+                   	LOAD s9, 50                     ;initialise [s9,s8] with 0x50 in MSBs (80 decimal)
+                   	LOAD s8, 00
+                   	LOAD s0, 9'd                   ;9 subtract and shift iterations to be performed (0x50 uses 7 bits for a total of 16)
+							; a general purpose subtract function would perform all 16 shifts and would have the 
+							; 8-bit divisor loaded straight into s8 with s9 being 00 (the MSB)
+        div80_loop:	SUB sE, s8                      ;perform 16-bit subtract [sB,sA]-[s9,s8]
+                   	SUBCY sF, s9
+                   	JUMP C, div80_restore           ;if carry then could not subtract from total
+                   	SL1 s2                          ;shift '1' into result because subtract ok
+                   	JUMP div80_shifts
+     div80_restore:	ADD sE, s8                      ;perform 16-bit addition [sB,sA]+[s9,s8]
+                   	ADDCY sF, s9                    ;to restore total
+                   	SL0 s2                          ;shift '0' into result because could no subtract
+      div80_shifts:	SLA s3                          ;complete 16-bit shift left into [s3,s2]
+                   	SR0 s9                          ;divide '10' value by 2 (shift right 1 place)
+                   	SRA s8
+                   	SUB s0, 01                      ;count iterations
+                   	RETURN Z                        ;on return the remainder of division is in sA
+                   	JUMP div80_loop
+
+
+
+                    ;1s is 50,000,000 clock cycles requiring 6,250,000 delay iterations
+                    ;
+          delay_1s: LOAD s2, 5F
+                    LOAD s1, 5E
+                    LOAD s0, 10
+                    JUMP software_delay
+                    ;
+                    ; The delay loop decrements [s2,s1,s0] until it reaches zero
+                    ; Each decrement cycle is 4 instructions which is 8 clock cycles (160ns at 50MHz)
+                    ;
+    software_delay: SUB s0, 1'd
+                    SUBCY s1, 0'd
+                    SUBCY s2, 0'd
+                    JUMP NZ, software_delay
+                    RETURN 
+
+			; send_CR sends a carriage return (0D) out the serial port
+			;
+
+           send_CR: LOAD s5, CR
+                    JUMP UART_TX                    ;includes RETURN
+
+
+	send_SPC:	LOAD s5, " "
+			JUMP UART_TX
+
+                    INCLUDE "uart_interface_routines.psm"
+                    ;
+                    ;
+                    ;------------------------------------------------------------------------------------------
+                    ; End of Program
+                    ;------------------------------------------------------------------------------------------
+                    ;

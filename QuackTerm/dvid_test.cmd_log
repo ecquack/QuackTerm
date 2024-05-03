@@ -1,0 +1,1 @@
+pin2ucf -o dvid_test_locked.ucf dvid_test.ncd 

@@ -1,0 +1,2351 @@
+;Copyright (C) 2017 Erik C. Quackenbush erikcq@quackenbush.com
+;
+; this is an ANSI terminal emulation program.
+;
+; this Picoblaze-6 program implements an ANSI display terminal which talks to a host over the USB to serial 
+; converter and generates an HDMI 120x67 (or 80x50) character display with input from a keyboard processor.
+
+; 
+; MAX_LINE_upper/lower is one character beyond the last visible character in the last line of the screen.
+; LAST_LINE is the first character of the last line on the screen
+; MAX_LINE is the number of lines on the screen.
+;
+
+;	RAM ADDRESS assignments
+;	this is our memory map. 
+	CONSTANT	scratchLOW,	00
+	CONSTANT	scratchHIGH,	01
+
+	CONSTANT	decimal0,	02	;  5 digit decimal value
+	CONSTANT	decimal1,	03	;  Suitable for 16-bit values up to
+	CONSTANT	decimal2,	04	;  65,536, used to print integer values
+	CONSTANT	decimal3,	05
+	CONSTANT	decimal4,	06
+
+	CONSTANT	param_counter,	07	; the number of CSI parameters is stored in 0x07
+	CONSTANT	param_block,	08	; the parameter block is stored at location 0x08-0x0F
+	CONSTANT	param_two,	09	; second parameter
+	CONSTANT	max_param,	10	; the last valid entry in the parameter block is 0x0F (0x10-1)
+	CONSTANT	digit_counter,	11	; the number of digits in the current parameter (so far) is stored in 0x11
+	CONSTANT	digit_block,	12	; the string of digits
+	CONSTANT	max_digit,	05	; we only allow 4 digit decimal parameters & we only process three of those digits. (this is not a RAM location)
+
+	CONSTANT	RAM_17,		17
+	CONSTANT	RAM_18,		18
+	CONSTANT	RAM_19,		19
+	CONSTANT	RAM_1A,		1A	; these are unused
+	CONSTANT	RAM_1B,		1B
+	CONSTANT	RAM_1C,		1C
+	CONSTANT	RAM_1D,		1D
+
+	CONSTANT	offset_low,	1E	; scrolling offset used for hardware scrolling
+	CONSTANT	offset_high,	1F	; this address gets added in hardware to the cursor address.
+
+	CONSTANT	MAX_LINE_LOWER,		20
+	CONSTANT	MAX_LINE_UPPER,		21
+	CONSTANT	LAST_LINE_LOWER,	22
+	CONSTANT	LAST_LINE_UPPER,	23
+
+	CONSTANT	video_mode,		2F
+	CONSTANT	mode_flags,		30
+	CONSTANT	last_char,		31	; the last character transmitted
+	CONSTANT	saved_cursor_low,	32
+	CONSTANT	saved_cursor_high,	33
+	CONSTANT	saved_color_reg,	34
+	CONSTANT	saved_ansi_reg,		35
+
+	CONSTANT	scratchQ,		36
+	CONSTANT	scratchR,		37
+	CONSTANT	scratchS,		38
+	CONSTANT	scratchT,		39
+	CONSTANT	scratchU,		3A
+	CONSTANT	scratchV,		3B
+
+	CONSTANT	scratchW,		3C
+	CONSTANT	scratchX,		3D
+	CONSTANT	scratchY,		3E
+	CONSTANT	scratchZ,		3F	; the top of memory unless we change the picoblaze-6 generic in VHDL
+
+; these bits are used by video_mode
+
+	CONSTANT	VIDEO_TALL,		01	; 67/50 or 33/25 lines (these bits define the video mode)
+	CONSTANT	VIDEO_EIGHTY,		02	; width 120 or 80
+	CONSTANT	VIDEO_FIFTY,		04	; height 67 or 50 (or 33/25 in tall mode)
+
+	CONSTANT	CURSOR_BLOCK,		08	; block cursor or underline cursor?
+	CONSTANT	CURSOR_HIDDEN,		10	; hidden cursor is not a hardware feature- the software just moves it off the visibile screen when idle.
+
+	CONSTANT	CURSOR_BLOCK_CLR,	F7
+	CONSTANT	CURSOR_HIDDEN_CLR,	EF
+
+; thses bits are used by mode_flags
+
+	CONSTANT	MODE_ALTERNATE_FONT,	01	; ninth bit of character memory
+	CONSTANT	MODE_UNDERLINE,		02	; ninth bit of attribute memory
+	CONSTANT	MODE_04,		04	; bit reserved. 
+	CONSTANT	MODE_08,		08	; bit reserved. 
+	CONSTANT	MODE_10,		10	; bit reserved. 
+	CONSTANT	MODE_SET_FONT,		20
+	CONSTANT	MODE_META,		40
+	CONSTANT	MODE_LOCAL,		80
+
+	CONSTANT	MODE_ALTERNATE_FONT_CLR,FE
+	CONSTANT	MODE_UNDERLINE_CLR,	FD
+	CONSTANT	MODE_SET_FONT_CLR,	DF
+	CONSTANT	MODE_META_CLR,		BF
+	CONSTANT	MODE_LOCAL_CLR,		7F
+
+	; these are the 8 possible video modes
+	;
+	; 0x00  120x67 * default
+	; 0x01  120x33
+	; 0x02   80x67
+	; 0x03   80x33
+	; 0x04  120x50
+	; 0x05  120x25
+	; 0x06	 80x50
+	; 0x07	 80x25
+
+
+		; these are the I/O port addresses.
+		;
+
+		CONSTANT MSB_PORT,		02	; write the MSB of the cursor position here
+		CONSTANT LSB_PORT,		03	; write the LSB of the cursor position here
+		CONSTANT CHAR_PORT,		04	; write the character value here
+		CONSTANT CHAR_READ_PORT,	05	; read the character value here
+
+		CONSTANT ATTR_PORT,		09	; write to this to set the colors
+		CONSTANT ATTR_READ_PORT,	0A	; read from this to see the colors
+
+		CONSTANT MODE_PORT,		0B	; sets the video mode bits (120/80,50/25,50/67)
+
+		CONSTANT UART_STATUS_PORT,	0C
+		CONSTANT UART_READ_FIFO_PORT,	0D
+
+		CONSTANT KEYBOARD_FIFO_PORT,	40
+		CONSTANT KEYBOARD_STATUS_PORT,	41
+
+		CONSTANT EXTRA_READ_PORT,	50
+		CONSTANT EXTRA_PORT,		51
+
+		CONSTANT FIFO_EMPTY,	01
+		CONSTANT FIFO_FULL,	02
+
+		CONSTANT OFFSET_MSB_PORT,	0E	; scrolling offset gets added to the cursor address
+		CONSTANT OFFSET_LSB_PORT,	0F	; so try to set these to a multiple of CHAR_PER_LINE
+
+
+		; ANSI_FLAG_REG contains these command processing state flag bigs
+		; OR these with the register to set the bits
+		CONSTANT ANSI_CSI,		01	; did we receive an ESC followed by a [ prefix?
+		CONSTANT ANSI_ESCAPE,		02	; did we receive an ESC prefix?
+		CONSTANT ANSI_ESC_CSI,		03	; either ESC and/or CSI
+		CONSTANT ANSI_INVERSE,		04	; are the foreground and background colors revered?
+		CONSTANT ANSI_HIDDEN,		08	; is the foreground color set to the background color?
+		CONSTANT ANSI_SSG2,		10	; single shift 2: the next character is to be printed RAW
+		CONSTANT ANSI_DEBUG,		20	; we output characters RAW for debugging
+		CONSTANT ANSI_VT_GRAPHICS,	40	; VT100 graphics characters instead of lower case
+		CONSTANT ANSI_SSG3,		80	; single shift 3
+
+		CONSTANT ANSI_SSG,		90	; either single shift
+
+		; AND these with the register to clear the bits
+		CONSTANT ANSI_CSI_CLR,		FE
+		CONSTANT ANSI_ESCAPE_CLR,	FD
+		CONSTANT ANSI_INVERSE_CLR,	FB
+		CONSTANT ANSI_HIDDEN_CLR,	F7
+
+		CONSTANT ANSI_SSG2_CLR,		EF
+		CONSTANT ANSI_DEBUG_CLR,	DF
+		CONSTANT ANSI_VT_GRAPHICS_CLR,	BF
+		CONSTANT ANSI_SSG3_CLR,		7F
+
+		; a few special characters
+		CONSTANT ENQ_CHAR,		05
+		CONSTANT ACK_CHAR,		06
+		CONSTANT BEL_CHAR,		07
+		CONSTANT TAB_CHAR,		09
+		CONSTANT VT_CHAR,		0B	; vertical tab
+		CONSTANT FORM_FEED_CHAR,	0C
+		CONSTANT ESC_CHAR,		1B
+		CONSTANT RUBOUT_CHAR,		7F
+
+		CONSTANT META_CHAR,		9E	; special char used for in-band signalling from the keyboard
+
+;
+; the meta char precedes one of these which indicates which modifiers were used with the scroll_lock key.
+; if the meta key occurs twice in a row it's treated as a single literal 0x9E (control-alt-^) and forwarded to the host.
+;
+
+		CONSTANT META_PLAIN,			73	; lower case s	- meta key (scroll lock) with no modifiers
+		CONSTANT META_SHIFT,			53	; upper case S	- meta key with shift modifier
+		CONSTANT META_CONTROL,			13	; control-s	- meta key with control modifier
+		CONSTANT META_ALT,			F3	; lower case s with high bit set
+		CONSTANT META_CONTROL_ALT,		93	; control-s with high bit set
+		CONSTANT META_SHIFT_ALT,		D3	; upper case S with high bit set
+		CONSTANT META_CONTROL_SHIFT,		24	; dollar sign 
+		CONSTANT META_CONTROL_ALT_SHIFT,	A4	; dollar sign with high bit set
+
+; registers s0 and s1 are used for local scratch.
+; registers s4 and s5 are used for parameters
+;
+; registers sE is used as the column position (remainder)
+; registers sE and sF are used for copies.
+;
+
+		NAMEREG s2, DIVIDEND_LOW
+		NAMEREG s3, DIVIDEND_HIGH
+		NAMEREG	s6, COLOR_REG
+		NAMEREG s7, MAX_LINE
+		NAMEREG	s8, DIVISOR_LOW
+		NAMEREG s9, DIVISOR_HIGH
+		NAMEREG sA, CURSOR_HIGH
+		NAMEREG	sB, CURSOR_LOW
+		NAMEREG sC, ANSI_FLAG_REG
+		NAMEREG	sD, CHAR_PER_LINE
+                    ;------------------------------------------------------------------------------------------
+                    ; Main Program
+                    ;------------------------------------------------------------------------------------------
+
+
+        cold_start:
+			CALL	init_terminal
+			JUMP	echo_loop
+
+	init_terminal:
+
+			LOAD	CHAR_PER_LINE, 78		; we default to 120 columns
+			LOAD	MAX_LINE, 43
+			LOAD	s0, 00
+			STORE	s0, video_mode			; set video mode to 120x67 with underline cursor
+			OUTPUT	s0, MODE_PORT
+	init_mode:
+			LOAD	s0, 00
+			STORE	s0, saved_cursor_low		; clear the saved (alternate) cursor position
+			STORE	s0, saved_cursor_high
+			STORE	s0, offset_low			; clear the scrolling offset
+			STORE	s0, offset_high
+			OUTPUT	s0, OFFSET_LSB_PORT		; set the hardware scrolling registers to zero
+			OUTPUT	s0, OFFSET_MSB_PORT
+			STORE	s0, last_char			; set last character to NULL
+			STORE	s0, mode_flags			; clear assorted mode bits
+                    	CALL	reset_UART_macros		; Reset buffers in UART macros
+			LOAD	ANSI_FLAG_REG, 00		; set ANSI parsing flags
+			STORE	ANSI_FLAG_REG, saved_ansi_reg
+			LOAD	COLOR_REG, 70			; standard intensity white on black  (change to F0 for high intensity)
+			STORE	COLOR_REG, saved_color_reg
+			CALL	set_maximums
+	soft_boot:
+			CALL	form_feed			; clear the screen
+			
+			LOAD	DIVISOR_LOW,hello_msg'upper
+			LOAD	DIVISOR_HIGH,hello_msg'lower
+			CALL	print_string			; print our Hello message
+
+			
+			FETCH	DIVIDEND_LOW, video_mode
+			LOAD	DIVIDEND_HIGH, 00
+			CALL	print_integer
+
+			LOAD	s5, " "
+			CALL	send_next
+			LOAD	s5, "("
+			CALL	send_next
+
+			LOAD	DIVIDEND_LOW, CHAR_PER_LINE
+			LOAD	DIVIDEND_HIGH, 00
+			CALL	print_integer
+
+			LOAD	s5,"x"
+			CALL	send_next
+
+			LOAD	DIVIDEND_LOW, MAX_LINE
+			LOAD	DIVIDEND_HIGH, 00
+			CALL	print_integer
+			LOAD	s5, ")"
+			CALL	send_next
+
+			LOAD	s5, 20				; fill with spaces
+
+			LOAD	s0, 10				; display 15 mini color bars
+	color_loop:
+			STORE	s0, scratchV
+			CALL	send_next
+			CALL	send_next
+			ADD	COLOR_REG, 01
+			FETCH	s0, scratchV
+			SUB	s0, 01
+			COMPARE	s0, 00
+			JUMP	NZ, color_loop
+			LOAD	COLOR_REG,	70		; restore the default colors
+
+			CALL	CRLF 				; carriage_return
+
+			RETURN
+
+
+	set_maximums:
+			LOAD	DIVISOR_LOW, CHAR_PER_LINE
+			LOAD	DIVISOR_HIGH, MAX_LINE
+			CALL	mult_8x8
+			STORE	s4, MAX_LINE_LOWER
+			STORE	DIVIDEND_HIGH, MAX_LINE_UPPER
+			SUB	s4, CHAR_PER_LINE
+			SUBCY	DIVIDEND_HIGH, 00
+			STORE	s4, LAST_LINE_LOWER
+			STORE	DIVIDEND_HIGH, LAST_LINE_UPPER
+			RETURN
+
+; OK, we've initialized things and sent our welcome message to the screen. Now we process characters from the
+; UART and PS/2 ports in an endless loop.
+;
+;	The CURSOR_LOW and CURSOR_HIGH registers hold the cursor address (linear).
+;	The COLOR_REG register holds the current color attributes (MSB 16 foreground, LSB 16 background)
+;	The ANSI flags register stores state information
+;
+;
+	echo_loop:
+			FETCH	s0, video_mode
+			TEST	s0, CURSOR_HIDDEN
+			CALL	NZ, hide_cursor
+			CALL 	KEYBOARD_CHECK
+			CALL	UART_FIFO_RX		; use the new FIFO instead of the built in FIFO
+ 	                JUMP Z, echo_loop		
+			CALL	send_next		
+		;	LOAD	s4,s5			; uncomment these for debugging if you want a hex output of each code. note that it can't possibly keep up
+		;	CALL	hex_byte		; with a full speed data feed since it's sending 3 bytes for every one received.
+		;	LOAD	s5," "
+		;	CALL	UART_TX
+			JUMP	echo_loop
+
+	UART_FIFO_RX:						; read a character from the primary FIFO. Set Z flag if present
+			LOAD	s1, A7				;Timeout = 167 x (6 instructions x 2 clock cycles)
+	UART_TIMEOUT:
+			INPUT	s0, UART_STATUS_PORT
+			TEST	s0, FIFO_EMPTY			;Z=0 and C=1 when data present
+			JUMP	Z, read_fifo_Rx
+			SUB	s1, 01
+			RETURN	Z				;Timeout returns with Z=1 and C=0
+			JUMP	UART_TIMEOUT
+          read_fifo_Rx: INPUT	s5, UART_READ_FIFO_PORT		;read character from buffer
+			LOAD	s0, 00
+			ADD	s0 ,01 				; force clear the zero flag to indicate that we have a character in s5.
+			RETURN 
+
+	KEYBOARD_FIFO_RX:					; read a character from the keyboard FIFO. Set Z flag if present
+			LOAD	s1, A7
+	KEYBOARD_TIMEOUT:
+			INPUT	s0, KEYBOARD_STATUS_PORT
+			TEST	s0, FIFO_EMPTY
+			JUMP	Z, keyboard_rx
+			SUB	s1, 01
+			RETURN	Z
+			JUMP	KEYBOARD_TIMEOUT
+	keyboard_rx:
+			INPUT	s5, KEYBOARD_FIFO_PORT
+			LOAD	s0, 00				; force clear the Z flag 
+			ADD	s0, 01
+			RETURN
+
+
+;
+; PS2CHECK reads a byte from the PS/2 keyboard processor port. If it's a special
+; key it sets the appropriate flags, otherwise it sends it to the host.
+;
+
+	KEYBOARD_CHECK:
+			CALL	KEYBOARD_FIFO_RX
+			RETURN	Z
+			FETCH	s0, mode_flags
+			TEST	s0, MODE_META
+			JUMP	NZ, meta_command		; META is set so this is a command
+			COMPARE	s5, META_CHAR
+			JUMP	NZ, KEYBOARD_TX			; normal char
+			OR	s0, MODE_META			; meta char- set the flag and store it
+			STORE	s0, mode_flags
+			RETURN
+
+	meta_command:
+			AND	s0, MODE_META_CLR		; clear the flag and store it
+			STORE	s0, mode_flags
+			COMPARE	s5, META_CHAR			; if it's a second META_CHAR we just forward it to the host
+			JUMP	Z, KEYBOARD_TX
+			COMPARE	s5, META_CONTROL_ALT_SHIFT
+			JUMP	Z, init_terminal		; control-alt-shift-scroll_lock resets the terminal
+			COMPARE s5, META_ALT
+			JUMP	Z, mode_next			; alt-scroll_lock changes the video mode
+			COMPARE s5, META_SHIFT
+			JUMP	NZ, meta_next
+			XOR	s0, MODE_LOCAL
+			STORE	s0, mode_flags
+			RETURN
+	meta_next:	COMPARE	s5, META_CONTROL
+			RETURN	NZ
+			XOR	ANSI_FLAG_REG, ANSI_DEBUG
+			RETURN
+
+	mode_next:						; increment the video mode
+			FETCH	s0, video_mode
+			ADD	s0, 01
+			AND	s0, 07				; clear the high bits (resets MODE_BLOCK)
+	vmode_set:
+			STORE	s0, video_mode
+			OUTPUT	s0, MODE_PORT
+
+	video_0:				; 120x67
+			COMPARE	s0, 00
+			JUMP	NZ, video_1
+			LOAD	MAX_LINE, 43
+			LOAD	CHAR_PER_LINE, 78
+			JUMP	init_mode
+	video_1:				; 120x33 (just tall)
+			COMPARE s0, 01
+			JUMP	NZ, video_2
+			LOAD	MAX_LINE, 21
+			LOAD	CHAR_PER_LINE, 78
+			JUMP	init_mode
+	video_2:				; 80x67 (just eighty)
+			COMPARE s0, 02
+			JUMP	NZ, video_3
+			LOAD	MAX_LINE, 43
+			LOAD	CHAR_PER_LINE, 50
+			JUMP	init_mode
+	video_3:				; 80x33 (tall & eighty)
+			COMPARE s0, 03
+			JUMP	NZ, video_4
+			LOAD	MAX_LINE, 21
+			LOAD	CHAR_PER_LINE, 50
+			JUMP	init_mode
+	video_4:				; 120x50 (just fifty)
+			COMPARE s0, 04
+			JUMP	NZ, video_5
+			LOAD	MAX_LINE, 32
+			LOAD	CHAR_PER_LINE, 78
+			JUMP	init_mode
+	video_5:				; 120x25 (tall & fifty)
+			COMPARE s0, 05
+			JUMP	NZ, video_6
+			LOAD	MAX_LINE, 19
+			LOAD	CHAR_PER_LINE, 78
+			JUMP	init_mode
+	video_6:				; 80x50 (eighty & fifty)
+			COMPARE s0, 06
+			JUMP	NZ, video_7
+			LOAD	MAX_LINE, 32
+			LOAD	CHAR_PER_LINE, 50
+			JUMP	init_mode
+	video_7:				; 80x25 (tall & eighty & fifty)
+			LOAD	MAX_LINE, 19
+			LOAD	CHAR_PER_LINE, 50
+			JUMP	init_mode
+
+	KEYBOARD_TX:						; send a char from the keyboard
+			CALL	UART_TX
+			FETCH	s0, mode_flags
+			TEST	s0, MODE_LOCAL			; local echo flag
+			JUMP	NZ, send_next
+			RETURN
+
+
+; set_cursor
+; sets the cursor address for the HDMI character display to sAsB
+; returns without affecting any registers
+;
+; note that you need a NOP or some other instruction after setting the address (the RETURN is sufficient)
+; before you read or write the memory.
+;
+	decrement_cursor:
+			SUB	CURSOR_LOW, 01
+			SUBCY	CURSOR_HIGH, 00
+			RETURN
+	advance_cursor:
+			ADD	CURSOR_LOW, 01
+			ADDCY	CURSOR_HIGH, 00
+	set_cursor:
+			OUTPUT 	CURSOR_HIGH, MSB_PORT		; set MSB of address
+			OUTPUT	CURSOR_LOW, LSB_PORT		; set LSB of address
+			RETURN
+
+	hide_cursor:
+			FETCH	s0, MAX_LINE_LOWER
+			OUTPUT	s0, LSB_PORT
+			FETCH	s0, MAX_LINE_UPPER
+			OUTPUT	s0, MSB_PORT
+			RETURN
+
+;
+; send_next 
+; writes a character in s5 to the HDMI terminal. It processes control sequences and
+; handles scrolling when appropriate.
+;
+	send_next:	
+			CALL	set_cursor
+			COMPARE	s5, 1B			; is it an escape?
+			JUMP	Z, not_stored
+			TEST	ANSI_FLAG_REG, ANSI_ESC_CSI
+			JUMP	NZ, not_stored		; we don't store the character if it's part of a command sequence
+			STORE	s5, last_char
+	not_stored:
+			TEST	ANSI_FLAG_REG, ANSI_SSG
+			JUMP	NZ, raw_char_out	; is SS2 in effect? print it raw
+			COMPARE	s5, 00			; if it's a NULL we do nothing, unless we're in SSG2 then we've already printed it.
+			RETURN	Z
+			TEST	ANSI_FLAG_REG, ANSI_CSI	; we're in the middle of a CSI sequence
+			JUMP	NZ, parse_csi_digit
+			TEST	ANSI_FLAG_REG, ANSI_ESCAPE	; we're in the middle of an ESC sequence
+			JUMP	NZ, escape_sequence
+			TEST	ANSI_FLAG_REG, ANSI_DEBUG	; if we're in debug mode we send the character in RAW mode
+			JUMP	NZ, raw_char_out
+	control_character:
+			COMPARE s5, ESC_CHAR		; ESCAPE sequence begins
+			JUMP	Z, escape_received
+			COMPARE s5, BS 			; control-h is backspace
+			JUMP 	Z, backspace		; non-destructive backspace
+			COMPARE	s5, RUBOUT_CHAR
+			JUMP 	Z, rubout		; destructive backspace ctrl-?
+			COMPARE	s5, TAB_CHAR
+			JUMP	Z, htab			; non-destructive TAB ctrl-i
+			COMPARE s5, CR			; carriage return 0x0D ctrl-m
+			JUMP 	Z, carriage_return
+			COMPARE	s5, LF			; line feed 0x0A ctrl-j
+			JUMP 	Z, line_feed
+			COMPARE	s5, VT_CHAR		; vertical tab does a line feed ctrl-k
+			JUMP	Z, line_feed
+			COMPARE	s5, FORM_FEED_CHAR	; FORM FEED  0x0C ctrl-L
+			JUMP	Z, form_feed
+			COMPARE	s5, ENQ_CHAR		; ctrl-E
+			JUMP	Z, enquiry
+			COMPARE	s5, BEL_CHAR		; ctrl-G
+			JUMP	Z, ring_bell
+		;	COMPARE s5, 01			; ctrl-a
+		;	JUMP	Z, test_pattern		; this is for debugging only ****
+	raw_char_out:					; if you don't want to process any control or escape codes
+			STORE	s0, scratchX
+			TEST	ANSI_FLAG_REG, ANSI_HIDDEN
+			JUMP	Z, raw_vt_graphics
+			LOAD	s5, 20			; if we're hidden we only print spaces
+	raw_vt_graphics:
+			TEST	ANSI_FLAG_REG, ANSI_VT_GRAPHICS
+			JUMP	Z, raw_output
+
+;
+; if we're using the "standard" codepage 1252 font with VT100 characters in the ANSI "C0" control character range (0-31)
+; these we use the following code
+;
+
+	check_lower_alpha:				; if we're not in the lower case alpha range 0x60-0x7E then we just print it raw
+			COMPARE	s5, 7F			; lower case 'z' plus one
+			JUMP	NC, raw_output		; we're above z
+			COMPARE	s5, 5F			; lower case 'a' minus one
+			JUMP	C, raw_output
+			JUMP	Z, raw_output		; we're below or equal to 'a' minus one
+	VT_graphic:					; we're a VT100 graphics character
+			COMPARE	s5, 60
+			JUMP	NZ, VT_shift
+			LOAD	s5, 1F			; accent grave is a special case- we use 0x1F instead of 0x00
+			JUMP	raw_output
+	VT_shift:					; shift the characters down to the 0-31 control character range.
+			SUB	s5, 60
+			JUMP	raw_output
+	raw_output:
+
+			AND	ANSI_FLAG_REG, ANSI_SSG2_CLR	; we clear it even if it's not already set. it's cheaper than testing it.
+			FETCH	s0, mode_flags
+			OUTPUT	s0, EXTRA_PORT
+			OUTPUT	s5, CHAR_PORT
+			OUTPUT	COLOR_REG, ATTR_PORT
+			CALL	advance_cursor
+			CALL	compare_cursor_max	; are we past the end of the screen?
+			RETURN	NZ			; no, we return
+			CALL	decrement_cursor
+			CALL	set_cursor
+			CALL	home_cursor		; move 
+			JUMP	scroll_up
+
+; these are the ANSI/ASCII functions.
+; This is where we process control characters like backspace, cursor movement, carriage return, etc.
+;
+
+	escape_received:					; we're not escaped and we just got an escape character
+			OR	ANSI_FLAG_REG, ANSI_ESCAPE
+			RETURN
+
+	escape_sequence:					; we're currently escaped and we just got another character
+			COMPARE	s5, "["
+			JUMP	NZ, not_csi
+			OR	ANSI_FLAG_REG, ANSI_CSI
+			CALL	parse_csi_init
+			RETURN
+	not_csi:
+
+	save_cursor:
+			COMPARE	s5, "7"
+			JUMP	NZ, restore_cursor
+			STORE	CURSOR_LOW, saved_cursor_low
+			STORE	CURSOR_HIGH, saved_cursor_high
+			STORE	COLOR_REG, saved_color_reg
+			STORE	ANSI_FLAG_REG, saved_ansi_reg
+			JUMP	end_csi
+	restore_cursor:
+			COMPARE	s5, "8"
+			JUMP	NZ, RSI
+			FETCH	CURSOR_LOW, saved_cursor_low
+			FETCH	CURSOR_HIGH, saved_cursor_high
+			FETCH	COLOR_REG, saved_color_reg
+			FETCH	ANSI_FLAG_REG, saved_ansi_reg
+			CALL	set_cursor
+			JUMP	end_csi
+	RSI:							; reset the terminal
+			FETCH	s0, mode_flags
+			TEST	s0, MODE_SET_FONT
+			JUMP	NZ, set_VT100
+			COMPARE s5, "c"
+			JUMP	NZ, SSG2
+			JUMP	init_terminal			; we re-initialize everything but we don't blow our stack. parasitic return
+	SSG2:							; ESC-N without a CSI bracket is "single shift graphics 2". the next character received is treated literally.
+			COMPARE	s5, "N"
+			JUMP	NZ, clear_alternate_keypad
+			OR	ANSI_FLAG_REG, ANSI_SSG2
+			JUMP	end_csi
+	clear_alternate_keypad:					; clear alternate keypad mode, which we ignore.
+			COMPARE	s5, ">"
+			JUMP	NZ, set_font
+			JUMP	end_csi
+	set_font:
+			COMPARE s5, "("
+			JUMP	NZ, set_VT100
+			FETCH	s0, mode_flags
+			OR	s0, MODE_SET_FONT
+			STORE	s0, mode_flags
+			RETURN					; we do not clear the ESC here because we're expecting an additional character
+	set_VT100:
+			FETCH	s0, mode_flags
+			TEST	s0, MODE_SET_FONT
+			JUMP	Z, unknown_escape
+			AND	s0, MODE_SET_FONT_CLR
+			STORE	s0, mode_flags
+			COMPARE	s5, "0"
+			JUMP	NZ, clear_VT100
+			OR	ANSI_FLAG_REG, ANSI_VT_GRAPHICS
+			AND	s0, MODE_ALTERNATE_FONT_CLR
+			STORE	s0, mode_flags
+			JUMP	end_csi
+	clear_VT100:
+		;	AND	s0, MODE_SET_FONT_CLR
+		;	STORE	s0, mode_flags
+			COMPARE	s5, "B"
+			JUMP	NZ, set_alternate_font
+			AND	s0, MODE_ALTERNATE_FONT_CLR
+			STORE	s0, mode_flags
+			AND	ANSI_FLAG_REG, ANSI_VT_GRAPHICS_CLR
+			JUMP	end_csi
+	set_alternate_font:
+		;	AND	s0, MODE_SET_FONT_CLR
+		;	STORE	s0, mode_flags
+			COMPARE	s5, "1"
+			JUMP	NZ, set_alternate_graphics
+			OR	s0, MODE_ALTERNATE_FONT
+			STORE	s0, mode_flags
+			AND	ANSI_FLAG_REG, ANSI_VT_GRAPHICS_CLR
+			JUMP	end_csi
+	set_alternate_graphics:
+		;	AND	s0, MODE_SET_FONT_CLR
+		;	STORE	s0, mode_flags
+			COMPARE	s5, "2"
+			JUMP	NZ, set_video_mode
+			OR	s0, MODE_ALTERNATE_FONT
+			STORE	s0, mode_flags
+			OR	ANSI_FLAG_REG, ANSI_VT_GRAPHICS
+			JUMP	end_csi
+	set_video_mode:
+			COMPARE s5, 69		; are we less than "h" ?
+			JUMP	NC, end_csi
+			LOAD	s4, 60
+			COMPARE s4, s5
+			JUMP	NC, end_csi	; are we greater than or equal to "a"?
+			SUB	s5, 61		; normalize, "a"=0
+			LOAD	s0, s5
+			JUMP	vmode_set
+	unknown_escape:
+		;	LOAD	s4,s5
+		;	CALL	debug_s4e	; comment this line out unless debugging ****
+	end_csi:
+			AND	ANSI_FLAG_REG, ANSI_ESCAPE_CLR	; OK, we got an escape but the following key was meaningless so we cancel the escape
+			RETURN
+
+;
+; Parse CSI parameters
+;
+;
+
+;
+; So we store two things in RAM here. The list of parameters (each can be 0-255) is stored starting at RAM08 (param_block).
+; There is room for a maximum of eight parameters in RAM.
+; The value stored at RAM07 is the parameter count which tells us how many valid parameters there are stored. It can be zero.
+;
+; As we're processing decimal digits while parsing parameters we store them at RAM12 (digit_block) through RAM15. We can
+; store a maximum of four digits but only if the first digit is a leading zero. In most cases if the value is greater than 255
+; things will not work correctly.
+;
+; The number of decimal digits (so far) in the current parameter is stored in RAM11 (digit_counter).
+
+	parse_csi_init:				; we've just received the CSI intro sequence ESC-[
+			LOAD	s0, 00
+			STORE	s0, param_counter
+			STORE	s0, digit_counter
+			RETURN
+
+	start_clear:	LOAD	s0, param_block
+			LOAD	s1, 00
+ 	clear_params:	STORE	s1, (s0)
+			ADD	s0, 01
+			COMPARE	s0, max_param
+			JUMP	NZ, clear_params
+			RETURN
+
+	parse_csi_digit:			; we've received something after the CSI and it's in s5
+			COMPARE	s5, 3A			; digit '9' plus one
+			JUMP	NC, not_a_digit		; we're above 9
+			COMPARE	s5, 2F			; digit '0' minus one 
+			JUMP	C, not_a_digit
+			JUMP	Z, not_a_digit		; we're below or equal to '0' minus one
+							; OK, we're a decimal digit
+	process_digit:
+			LOAD	s0, digit_block 
+			FETCH	s1, digit_counter
+			ADD	s0, s1			; calculate the storage address
+			STORE	s5, (s0)
+			ADD	s1, 01			; increment the number of digits
+		;	COMPARE	s1, max_param
+		;	JUMP	Z, exit_escape		; return without storing the incremented value if we're at the limit ****
+							; we should probably abort the whole escape sequence at this point too, but either way we've lost sync with the host application
+			STORE	s1, digit_counter
+			RETURN
+	not_a_digit:	
+			CALL	end_param		; finish up any parameter we've started
+	check_semicolon:
+			COMPARE	s5, ";"
+			JUMP	NZ, check_question_mark
+			RETURN
+
+	check_question_mark:
+			COMPARE	s5, "?"
+			JUMP	NZ, csi_scroll_up
+			RETURN
+
+	csi_scroll_up:
+			COMPARE	s5, "S"
+			JUMP	NZ, csi_scroll_down
+			FETCH	s0, param_block
+			COMPARE s0, 00
+			JUMP	NZ, scroll_up_loop
+			ADD	s0, 01
+	scroll_up_loop:
+			STORE	s0, scratchR
+			CALL	scroll_up
+			FETCH	s0, scratchR
+			SUB	s0, 01
+			COMPARE	s0, 00
+			JUMP	NZ, scroll_up_loop
+			JUMP	exit_escape
+	csi_scroll_down:
+			COMPARE s5, "T"
+			JUMP	NZ, csi_set_mode
+			FETCH	s0, param_block
+			COMPARE s0, 00
+			JUMP	NZ, scroll_down_loop
+			ADD	s0, 01
+	scroll_down_loop:
+			CALL	scroll_down
+			SUB	s0, 01
+			COMPARE	s0, 00
+			JUMP	NZ, scroll_down_loop
+			JUMP	exit_escape
+	csi_set_mode:
+			COMPARE	s5, "h"
+			JUMP	NZ, csi_reset_mode
+			FETCH	s0, param_two		; second param because of the question mark
+			COMPARE	s0, 12'd		; CSI ? 12 h is block cursor mode
+			JUMP	Z, block_cursor
+			COMPARE	s0, 25'd
+			JUMP	NZ, exit_escape
+	cursor_visible:
+			FETCH	s0, video_mode
+			AND	s0, CURSOR_HIDDEN_CLR
+			STORE	s0, video_mode
+			call	set_cursor
+			JUMP	exit_escape
+	block_cursor:
+			FETCH	s0, video_mode
+			OR	s0, CURSOR_BLOCK
+			STORE	s0, video_mode
+			OUTPUT	s0, MODE_PORT
+			JUMP	exit_escape
+	csi_reset_mode:
+			COMPARE	s5, "l"
+			JUMP	NZ, csi_delete_line
+			FETCH	s0, param_two		; second param because of the question mark
+			COMPARE	s0, 12'd		; CSI ? 12 l is underline cursor mode
+			JUMP	Z, underline_cursor
+			COMPARE	s0, 25'd
+			JUMP	NZ, exit_escape
+	cursor_hidden:
+			FETCH	s0, video_mode
+			OR	s0, CURSOR_HIDDEN
+			STORE	s0, video_mode
+			CALL	hide_cursor
+			JUMP	exit_escape
+	underline_cursor:
+			FETCH	s0, video_mode
+			AND	s0, CURSOR_BLOCK_CLR
+			STORE	s0, video_mode
+			OUTPUT	s0, MODE_PORT
+			JUMP	exit_escape
+	csi_delete_line:				; delete the current line and scroll everything up
+			COMPARE s5, "M"
+			JUMP	NZ, csi_insert_line
+			STORE	CURSOR_LOW, scratchLOW
+			STORE	CURSOR_HIGH, scratchHIGH
+			CALL	home_cursor
+			CALL	compare_cursor_last
+			JUMP	NZ, delete_line_0
+			CALL	scroll_up_plain
+			JUMP exit_escape
+	delete_line_0:
+			FETCH	s0, param_block
+			COMPARE	s0, 00			; we're always deleting at least one line
+			JUMP	NZ, delete_line_1
+			ADD	s0, 01
+	delete_line_1:					; if we're on the top line and we're only inserting one line we do a scroll up instead of an insert.
+	delete_line_2:
+			LOAD	DIVISOR_LOW, s0
+			LOAD	DIVISOR_HIGH, CHAR_PER_LINE
+			CALL	mult_8x8		; result in s4 and DIVIDEND_HIGH
+			STORE	s4, scratchX
+			STORE	DIVIDEND_HIGH, scratchY
+
+			LOAD	sE, CURSOR_LOW
+			LOAD	sF, CURSOR_HIGH
+			ADD	sE, s4
+			ADDCY	sF, DIVIDEND_HIGH	; starting address for copy
+			; make sure starting address for copy in sEsF is a legal address ****
+
+			FETCH	s0, MAX_LINE_LOWER
+			FETCH	s1, MAX_LINE_UPPER
+			STORE	DIVIDEND_LOW, scratchR
+	delete_line_loop:
+			OUTPUT	sE, LSB_PORT		; move to the source
+			OUTPUT	sF, MSB_PORT
+			LOAD	s0, s0			; NOP
+			INPUT	DIVIDEND_LOW, EXTRA_READ_PORT
+			INPUT	s4, CHAR_READ_PORT	; read the source
+			INPUT	s5, ATTR_READ_PORT
+			CALL	set_cursor		; move the to destination
+			OUTPUT	DIVIDEND_LOW, EXTRA_PORT
+			OUTPUT	s4, CHAR_PORT		; write the destination
+			OUTPUT	s5, ATTR_PORT
+			ADD	CURSOR_LOW, 01		; increment destination
+			ADDCY	CURSOR_HIGH, 00
+			ADD	sE, 01			; increment source
+			ADDCY	sF, 00
+			COMPARE	sE, s0
+			COMPARECY sF, s1
+			JUMP	NZ, delete_line_loop
+	end_delete_line_loop:
+			FETCH	DIVIDEND_LOW, scratchR
+			FETCH	CURSOR_LOW, MAX_LINE_LOWER
+			FETCH	CURSOR_HIGH, MAX_LINE_UPPER
+			FETCH	s4, scratchX
+			FETCH	DIVIDEND_HIGH, scratchY
+			SUB	CURSOR_LOW, s4
+			SUBCY	CURSOR_HIGH, DIVIDEND_HIGH
+			CALL	clear_last_lines	; this also restores our cursor position for us
+			JUMP	exit_escape
+
+	csi_insert_line:
+			COMPARE	s5, "L"
+			JUMP	NZ, csi_erase_char
+			STORE	CURSOR_LOW, scratchLOW
+			STORE	CURSOR_HIGH, scratchHIGH
+			CALL	home_cursor
+			CALL	compare_cursor_last		; if we're on the last line we just nuke it- no copying necessary
+			JUMP	NZ, insert_line_0
+			CALL	clear_last_line
+			JUMP	exit_escape
+	insert_line_0:
+			STORE	CURSOR_LOW, scratchV
+			STORE	CURSOR_HIGH, scratchW
+			FETCH	s0, param_block
+			COMPARE s0, 00
+			JUMP	NZ, insert_line_1		; we insert at least one line
+			ADD	s0, 01
+	insert_line_1:						; if we're at the top of the screen we do a scroll_down instead of an insert
+			COMPARE CURSOR_LOW, 00
+			COMPARECY CURSOR_HIGH, 00
+			JUMP	NZ, insert_line_2
+	insert_scroll:
+			CALL	scroll_down_offset
+			SUB	s0, 01
+			JUMP	NZ, insert_scroll
+			JUMP	exit_escape
+	insert_line_2:
+			;STORE	s0, param_block
+			LOAD	DIVISOR_LOW, s0
+			LOAD	DIVISOR_HIGH, CHAR_PER_LINE
+			CALL	mult_8x8
+			STORE	s4, scratchX
+			STORE	DIVIDEND_HIGH, scratchY		; s4/DH holds number of chars to insert
+			FETCH	sE, MAX_LINE_LOWER
+			FETCH	sF, MAX_LINE_UPPER
+			SUB	sE, 01
+			SUBCY	sF, 00
+			LOAD	CURSOR_LOW, sE			; CURSOR_LH holds last character of screen
+			LOAD	CURSOR_HIGH, sF
+
+			SUB	CURSOR_LOW, s4
+			SUBCY	CURSOR_HIGH, DIVIDEND_HIGH
+			LOAD	s5, DIVIDEND_HIGH
+			; make sure address is legal ****
+			FETCH	DIVIDEND_LOW, scratchV
+			FETCH	DIVIDEND_HIGH, scratchW
+			ADD	DIVIDEND_LOW, s4
+			ADDCY	DIVIDEND_HIGH, s5
+	insert_line_loop:
+			CALL	set_cursor
+			INPUT	DIVISOR_LOW, EXTRA_READ_PORT
+			INPUT	s4, CHAR_READ_PORT
+			INPUT	s5, ATTR_READ_PORT
+			OUTPUT	sE, LSB_PORT
+			OUTPUT  sF, MSB_PORT
+			LOAD	s0, s0			; NOP
+			OUTPUT	DIVISOR_LOW, EXTRA_PORT
+			OUTPUT	s4, CHAR_PORT
+			OUTPUT	s5, ATTR_PORT
+
+			CALL	decrement_cursor
+			SUB	sE, 01
+			SUBCY	sF, 00
+			COMPARE sE, DIVIDEND_LOW
+			COMPARECY sF, DIVIDEND_HIGH
+			JUMP	NZ, insert_line_loop
+
+			FETCH	s0, scratchX
+			FETCH	s1, scratchY
+			CALL	clear_current_lines 
+			JUMP	exit_escape
+	csi_erase_char:
+			COMPARE	s5, "X"
+			JUMP	NZ, csi_insert_char
+			STORE	CURSOR_LOW, scratchLOW
+			STORE	CURSOR_HIGH, scratchHIGH
+			FETCH	s0, param_block			; repeat count
+			LOAD	s5, 00
+			COMPARE s0, 00
+			JUMP	NZ, erase_char_loop
+			ADD	s0, 01
+	erase_char_loop:
+			OUTPUT	s5, EXTRA_PORT
+			OUTPUT	s5, CHAR_PORT
+			OUTPUT	COLOR_REG, ATTR_PORT
+			CALL	advance_cursor
+			SUB	s0, 01
+			COMPARE	s0, 00
+			JUMP	NZ, erase_char_loop
+			FETCH	CURSOR_LOW, scratchLOW
+			FETCH	CURSOR_HIGH, scratchHIGH
+			CALL	set_cursor
+			JUMP	exit_escape
+	csi_insert_char:
+			COMPARE	s5, "@"
+			JUMP	NZ, csi_delete_char
+			FETCH	s1, param_block
+			COMPARE	s1, 00
+			JUMP	NZ, insert_loop
+			ADD	s1, 01
+	insert_loop:
+			STORE	CURSOR_LOW, scratchLOW
+			STORE	CURSOR_HIGH, scratchHIGH
+			CALL	get_row_column_plus
+			LOAD	s0, CHAR_PER_LINE
+			SUB	s0, sE			; s0 now contains the number of characters to the end of the line
+			SUB	s0, 01
+			ADD	CURSOR_LOW, s0
+			ADDCY	CURSOR_HIGH, 00
+			CALL	set_cursor
+			ADD	s0, 01
+	insert_next:
+			INPUT	DIVIDEND_LOW, EXTRA_READ_PORT
+			INPUT	s4, CHAR_READ_PORT
+			INPUT	s5, ATTR_READ_PORT
+			CALL	advance_cursor
+			OUTPUT	DIVIDEND_LOW, EXTRA_PORT
+			OUTPUT	s4, CHAR_PORT
+			OUTPUT	s5, ATTR_PORT
+			SUB	CURSOR_LOW, 02
+			SUBCY	CURSOR_HIGH, 00
+			CALL	set_cursor
+			SUB	s0, 01
+			COMPARE	s0, 00
+			JUMP	NZ, insert_next
+			CALL	advance_cursor
+			LOAD	s4, 20
+			FETCH	DIVIDEND_LOW, 00		;mode_flags
+			OUTPUT	DIVIDEND_LOW, EXTRA_PORT
+			OUTPUT	s4, CHAR_PORT
+			OUTPUT	COLOR_REG, ATTR_PORT
+
+			SUB	s1, 01
+			COMPARE	s1, 00
+			JUMP	NZ, insert_loop
+			JUMP	exit_escape
+			;FETCH	CURSOR_LOW, scratchLOW
+			;FETCH	CURSOR_HIGH, scratchHIGH
+			;CALL	set_cursor
+
+	csi_delete_char:					; delete character forward and shift line
+			COMPARE s5, "P"
+			JUMP	NZ, csi_clear
+			FETCH	s1, param_block
+			COMPARE	s1, 00
+			JUMP	NZ, delete_loop
+			ADD	s1 , 01
+	delete_loop:
+			STORE	CURSOR_LOW, scratchLOW
+			STORE	CURSOR_HIGH, scratchHIGH
+			CALL	get_row_column_plus
+			LOAD	s0, CHAR_PER_LINE
+			SUB	s0, sE			; s0 now contains the number of characters to the end of the line
+	delete_next:
+			CALL	advance_cursor
+			INPUT	DIVIDEND_LOW, EXTRA_READ_PORT
+			INPUT	s4, CHAR_READ_PORT
+			INPUT	s5, ATTR_READ_PORT
+			CALL	decrement_cursor			
+			CALL	set_cursor
+			OUTPUT	DIVIDEND_LOW, EXTRA_PORT
+			OUTPUT	s4, CHAR_PORT
+			OUTPUT	s5, ATTR_PORT
+			ADD	CURSOR_LOW, 01
+			ADDCY	CURSOR_HIGH, 00
+			SUB	s0, 01
+			COMPARE	s0, 00
+			JUMP	NZ, delete_next
+
+			CALL	set_cursor
+			FETCH	DIVIDEND_LOW, EXTRA_READ_PORT
+			LOAD	s4, 20
+			OUTPUT	s4, EXTRA_PORT
+			OUTPUT	s4, CHAR_PORT
+			OUTPUT	COLOR_REG, ATTR_PORT
+			FETCH	CURSOR_LOW, scratchLOW
+			FETCH	CURSOR_HIGH, scratchHIGH
+			CALL	set_cursor
+
+			SUB	s1, 01
+			COMPARE	s1, 00
+			JUMP	NZ, delete_loop
+			JUMP	exit_escape
+
+	csi_clear:
+			COMPARE	s5, "J"
+			JUMP	NZ, csi_sgr
+			;CALL	form_feed
+			FETCH	s0, param_block
+			COMPARE	s0, 02
+			JUMP	NZ, partial_clear
+			CALL	form_feed
+			JUMP	exit_escape
+	partial_clear:
+			COMPARE	s0,01
+			JUMP	NZ, end_clear
+			CALL	clear_start_screen
+			JUMP	exit_escape
+	end_clear:
+			CALL	clear_end_screen
+			JUMP	exit_escape
+	csi_sgr:					; select graphics rendition, this is the big one
+			COMPARE	s5, "m"
+			JUMP	NZ, csi_move
+			FETCH	s0, param_counter
+			LOAD	s1, param_block
+			ADD	s0, s1
+	sgr_param:
+			FETCH	s4, (s1)
+	sgr_reset:
+			COMPARE	s4, 00			; 00 means reset all values
+			JUMP	NZ, sgr_bold
+			LOAD	COLOR_REG, 70		; default of dim white foreground black background 
+			AND	ANSI_FLAG_REG, ANSI_INVERSE_CLR
+			AND	ANSI_FLAG_REG, ANSI_HIDDEN_CLR
+		;	AND	ANSI_FLAG_REG, ANSI_VT_GRAPHICS_CLR	; is this right or do we require CSI 10 m instead?
+			FETCH	s4, mode_flags
+			AND	s4, MODE_UNDERLINE_CLR
+			STORE	s4, mode_flags
+			JUMP	sgr_next
+	sgr_bold:					; setting the high bit of foreground color makes it "bold" by choosing brighter colors
+			COMPARE	s4, 01
+			JUMP	NZ, sgr_underline
+			TEST	ANSI_FLAG_REG, ANSI_INVERSE
+			CALL	NZ, invert_colors
+			OR	COLOR_REG, 80
+			TEST	ANSI_FLAG_REG, ANSI_INVERSE
+			CALL	NZ, invert_colors
+			JUMP	sgr_next
+	sgr_underline:
+			COMPARE	s4, 04
+			JUMP	NZ, sgr_blink
+			FETCH	s4, mode_flags
+			OR	s4, MODE_UNDERLINE
+			STORE	s4, mode_flags
+			JUMP	sgr_next
+	sgr_blink:					; high bit of background color
+			COMPARE	s4, 05
+			JUMP	NZ, sgr_inverse
+			TEST	ANSI_FLAG_REG, ANSI_INVERSE
+			CALL	NZ, invert_colors
+			OR	COLOR_REG, 08
+			TEST	ANSI_FLAG_REG, ANSI_INVERSE
+			CALL	NZ, invert_colors
+			JUMP	sgr_next
+	sgr_inverse:
+			COMPARE	s4, 07
+			JUMP	NZ, sgr_hidden
+			TEST	ANSI_FLAG_REG, ANSI_INVERSE	; don't invert if we're already inverted
+			JUMP	NZ, sgr_next
+			CALL	invert_colors
+			OR	ANSI_FLAG_REG, ANSI_INVERSE
+			JUMP	sgr_next
+	sgr_hidden:					; turns on hidden mode- spaces will be printed instead of symbols
+			COMPARE	s4, 08
+			JUMP	NZ, sgr_default_font
+			OR	ANSI_FLAG_REG, ANSI_HIDDEN
+			JUMP	sgr_next
+	sgr_default_font:
+			COMPARE	s4, 0A			; CSI10m
+			JUMP	NZ, sgr_vt_graphics_font
+			AND	ANSI_FLAG_REG, ANSI_VT_GRAPHICS_CLR
+			FETCH	s4, mode_flags
+			AND	s4, MODE_ALTERNATE_FONT_CLR
+			STORE	s4, mode_flags
+			JUMP	sgr_next
+	sgr_vt_graphics_font:
+			COMPARE	s4, 0B			; CSI11m
+			JUMP	NZ, sgr_alternate_font
+			OR	ANSI_FLAG_REG, ANSI_VT_GRAPHICS
+			FETCH	s4, mode_flags
+			AND	s4, MODE_ALTERNATE_FONT_CLR
+			STORE	s4, mode_flags
+			JUMP	sgr_next
+	sgr_alternate_font:
+			COMPARE	s4, 0C			; CSI12m
+			JUMP	NZ, sgr_alternate_graphics_font
+			AND	ANSI_FLAG_REG, ANSI_VT_GRAPHICS_CLR
+			FETCH	s4, mode_flags
+			OR	s4, MODE_ALTERNATE_FONT
+			STORE	s4, mode_flags
+			JUMP	sgr_next
+	sgr_alternate_graphics_font:
+			COMPARE	s4, 0D			; CSI13m
+			JUMP	NZ, sgr_reveal
+			OR	ANSI_FLAG_REG, ANSI_VT_GRAPHICS
+			FETCH	s4, mode_flags
+			OR	s4, MODE_ALTERNATE_FONT
+			STORE	s4, mode_flags
+			JUMP	sgr_next
+	sgr_reveal:					; turns off hidden mode.
+			COMPARE	s4, 28'd
+			JUMP	NZ, sgr_normal_intensity
+			AND	ANSI_FLAG_REG, ANSI_HIDDEN_CLR
+			JUMP	sgr_next
+	sgr_normal_intensity:				; turn off boldface
+			COMPARE	s4, 22'd
+			JUMP	NZ, sgr_underline_off
+			TEST	ANSI_FLAG_REG, ANSI_INVERSE
+			CALL	NZ, invert_colors
+			AND	COLOR_REG, 7F
+			TEST	ANSI_FLAG_REG, ANSI_INVERSE
+			CALL	NZ, invert_colors
+			JUMP	sgr_next
+	sgr_underline_off:
+			COMPARE	s4, 24'd
+			JUMP	NZ, sgr_blink_off
+			FETCH	s4, mode_flags
+			AND	s4, MODE_UNDERLINE_CLR
+			STORE	s4, mode_flags
+			JUMP	sgr_next
+	sgr_blink_off:					; turn off blink
+			COMPARE	s4, 25'd
+			JUMP	NZ, sgr_positive
+			TEST	ANSI_FLAG_REG, ANSI_INVERSE
+			CALL	NZ, invert_colors
+			AND	COLOR_REG, F7
+			TEST	ANSI_FLAG_REG, ANSI_INVERSE
+			CALL	NZ, invert_colors
+			JUMP	sgr_next
+	sgr_positive:					; turn off inverse video
+			COMPARE	s4, 27'd
+			JUMP	NZ, sgr_default_foreground
+			TEST	ANSI_FLAG_REG, ANSI_INVERSE
+			JUMP	Z, sgr_next
+			CALL	invert_colors
+			AND	ANSI_FLAG_REG, ANSI_INVERSE_CLR
+			JUMP	sgr_next
+	sgr_default_foreground:
+			COMPARE	s4, 39'd
+			JUMP	NZ, sgr_default_background
+			TEST	ANSI_FLAG_REG, ANSI_INVERSE
+			CALL	NZ, invert_colors
+			AND	COLOR_REG, 0F
+			OR	COLOR_REG, 70
+			TEST	ANSI_FLAG_REG, ANSI_INVERSE
+			CALL	NZ, invert_colors
+			JUMP	sgr_next
+	sgr_default_background:
+			COMPARE	s4, 49'd
+			JUMP	NZ, sgr_foreground
+			TEST	ANSI_FLAG_REG, ANSI_INVERSE
+			CALL	NZ, invert_colors
+			AND	COLOR_REG, F0
+			TEST	ANSI_FLAG_REG, ANSI_INVERSE
+			CALL	NZ, invert_colors
+			JUMP	sgr_next
+	sgr_foreground:
+			COMPARE	s4, 38'd			; highest foreground color plus one
+			JUMP	NC, sgr_background
+			LOAD	s5, 29'd			; lowest foreground color minus one
+			COMPARE	s5, s4
+			JUMP	NC, sgr_background
+			; OK, we're in the range 30-37
+			TEST	ANSI_FLAG_REG, ANSI_INVERSE	; swap the colors if we need to
+			CALL	NZ, invert_colors
+			STORE	s4, scratchX
+			SUB	s4, 30'd			; normalize to zero
+			AND	COLOR_REG, 8F			; clear the three bits we're interested in
+			SL0	s4
+			SL0	s4
+			SL0	s4
+			SL0	s4
+			ADD	COLOR_REG, s4 			; and set the new value
+			TEST	ANSI_FLAG_REG, ANSI_INVERSE	; swap the colors back if we need to
+			CALL	NZ, invert_colors
+			FETCH	s4, scratchX
+			JUMP	sgr_next
+	sgr_background:
+			COMPARE	s4, 48'd			; highest background color plus one
+			JUMP	NC, sgr_other
+			LOAD	s5, 39'd			; lowest background color minus one
+			COMPARE	s5, s4
+			JUMP	NC, sgr_other
+			; OK, we're in the range 40-37
+			TEST	ANSI_FLAG_REG, ANSI_INVERSE	; swap the colors if we need to
+			CALL	NZ, invert_colors
+			STORE	s4, scratchX
+			SUB	s4, 40'd			; normalize to zero
+			AND	COLOR_REG, F8			; clear the three bits we're interested in
+			ADD	COLOR_REG, s4 			; and set the new value
+			TEST	ANSI_FLAG_REG, ANSI_INVERSE	; swap the colors back if we need to
+			CALL	NZ, invert_colors
+			FETCH	s4, scratchX
+			JUMP	sgr_next
+	sgr_other:
+	sgr_next:
+			ADD	s1,01
+			COMPARE	s1, s0
+			JUMP	NZ, sgr_param		; get the next one until we're done
+	sgr_end:
+			jump	exit_escape
+	csi_move:					; set cursor position Y,X
+			COMPARE	s5, "H"
+			JUMP	Z, csi_move2
+			COMPARE s5, "f"
+			JUMP	NZ, csi_set_row
+	csi_move2:
+			FETCH	s0, param_counter
+			COMPARE s0, 02			; do we have exactly two parameters?
+			JUMP	Z, two_params
+			LOAD	s0, 00
+			STORE	s0, param_two
+	two_params:	LOAD	s0, param_block
+			FETCH	s1, (s0)
+			COMPARE	s1, 00			; if we're already zero we don't subtract
+			JUMP	Z, move_y0
+			SUB	s1, 01			; we're zero based
+	move_y0:
+			COMPARE	s1, MAX_LINE
+			JUMP	C, move_y00		; clip to the bottom edge
+			LOAD	s1, MAX_LINE
+			SUB	s1, 01
+	move_y00:
+			LOAD	DIVISOR_LOW,s1
+			LOAD	DIVISOR_HIGH, CHAR_PER_LINE
+			CALL	mult_8x8
+			LOAD	CURSOR_HIGH, DIVIDEND_HIGH
+			LOAD	CURSOR_LOW, s4
+
+			ADD	s0,01
+			FETCH	s1, (s0)
+			COMPARE	s1, 00			;if we're already zero we don't subtract
+			JUMP	Z, move_x0
+			SUB	s1, 01			; we're zero based
+	move_x0:
+			COMPARE	s1, CHAR_PER_LINE
+			JUMP	C, move_x00		; clip to the right edge
+			LOAD	s1, CHAR_PER_LINE
+			SUB	s1, 01
+	move_x00:
+			ADD	CURSOR_LOW, s1
+			ADDCY	CURSOR_HIGH, 00
+
+			CALL	set_cursor
+
+			JUMP	exit_escape
+
+	csi_set_row:
+			COMPARE	s5, "d"
+			JUMP	NZ, csi_set_column
+			FETCH	s0, param_block
+			COMPARE	s0, 00
+			JUMP	Z, row_0
+			SUB	s0, 01
+	row_0:
+			COMPARE	s0, MAX_LINE
+			JUMP	C, row_00
+			LOAD	s0, MAX_LINE		; clip to the bottom edge
+			SUB	s0, 01
+	row_00:
+			STORE	s0, scratchX
+			CALL	get_row_column
+			FETCH	s0, scratchX
+			LOAD	DIVISOR_LOW, s0
+			LOAD	DIVISOR_HIGH, CHAR_PER_LINE
+			CALL	mult_8x8
+			LOAD	CURSOR_HIGH, DIVIDEND_HIGH
+			LOAD	CURSOR_LOW, s4
+			ADD	CURSOR_LOW, sE
+			ADDCY	CURSOR_HIGH, 00
+			CALL	set_cursor
+			JUMP	exit_escape
+	csi_set_column:
+			COMPARE	s5, "G"
+			JUMP	NZ, csi_repeat
+			FETCH	s0, param_block
+			COMPARE	s0, 00
+			JUMP	Z, column_0
+			SUB	s0, 01
+	column_0:
+			COMPARE	s0, CHAR_PER_LINE
+			JUMP	C, column_00
+			LOAD	s0, CHAR_PER_LINE		; clip to the right edge
+			SUB	s0, 01
+	column_00:
+			STORE	s0, scratchX
+			CALL	get_row_column
+			LOAD	DIVISOR_LOW, DIVIDEND_LOW
+			LOAD	DIVISOR_HIGH, CHAR_PER_LINE
+			CALL	mult_8x8
+			LOAD	CURSOR_HIGH, DIVIDEND_HIGH
+			LOAD	CURSOR_LOW, s4
+			FETCH	s0, scratchX
+			ADD	CURSOR_LOW, s0
+			ADDCY	CURSOR_HIGH, 00
+			CALL	set_cursor
+			JUMP	exit_escape
+	csi_repeat:					; repeat last character # times
+			COMPARE	s5, "b"
+			JUMP	NZ, csi_clear_line
+			AND	ANSI_FLAG_REG, ANSI_ESCAPE_CLR
+			AND	ANSI_FLAG_REG, ANSI_CSI_CLR
+			STORE	s5, scratchR
+			FETCH	s0, param_block
+			COMPARE	s0, 00
+			JUMP	NZ, repeat_loop
+			ADD	s0, 01			; treat zero as one
+	repeat_loop:
+			FETCH	s5, last_char		; do this every time?
+			STORE	s0, scratchQ
+			CALL	raw_char_out
+			FETCH	s0, scratchQ
+			SUB	s0, 01
+			COMPARE s0, 00
+			JUMP	NZ, repeat_loop
+			FETCH	s5, scratchR
+			RETURN
+	csi_clear_line:
+			COMPARE	s5, "K"			; ANSI.SYS ignores the parameter and always clears right
+			JUMP	NZ, csi_up		; the spec says parameter 1 clears left, 2 clears whole line
+			STORE	CURSOR_LOW, scratchLOW
+			STORE	CURSOR_HIGH, scratchHIGH
+			CALL	get_row_column_plus
+			FETCH	s4, param_block
+			COMPARE	s4, 00
+			JUMP	Z, clear_eol		; end of line
+			COMPARE	s4, 01
+			JUMP	Z, clear_sol		; start of line
+	clear_whole_line:
+			SUB	sE,01
+			SUB	CURSOR_LOW, sE
+			SUBCY	CURSOR_HIGH, 00
+			CALL	set_cursor		; we're at the start of the line
+			LOAD	sE, CHAR_PER_LINE
+			LOAD	s4, 00
+		;	FETCH	DIVIDEND_LOW, 00	; clear underline and font bits
+			JUMP	clear_eol_loop
+	clear_sol:					; start of line
+		;	FETCH	DIVIDEND_LOW, 00	; clear underline and font bits
+			LOAD	s4, 00
+	clear_sol_loop:
+			OUTPUT	s4, EXTRA_PORT
+			OUTPUT	s4, CHAR_PORT
+			OUTPUT	COLOR_REG, ATTR_PORT
+			CALL	decrement_cursor
+			CALL	set_cursor
+			SUB	sE, 01
+			COMPARE sE, 00
+			JUMP	NZ, clear_sol_loop
+			JUMP	finish_clear_line
+			
+	clear_eol:					; end of line
+			LOAD	s4, CHAR_PER_LINE
+			ADD	s4, 01			; we should just define another constant and remove this instruction
+			SUB	s4,sE			; invert it to get remaining characters
+			LOAD	sE,s4
+			;FETCH	DIVIDEND_LOW, 00	; clear underline and font bits
+			LOAD	s4, 00
+			COMPARE	sE, 00
+			JUMP	NZ, clear_eol_loop
+			LOAD	sE, CHAR_PER_LINE	; we're at the beginning of the line so we do it all
+	clear_eol_loop:
+			OUTPUT	s4, EXTRA_PORT
+			OUTPUT	s4, CHAR_PORT
+			OUTPUT	COLOR_REG, ATTR_PORT
+			CALL	advance_cursor
+			SUB	sE,01
+			COMPARE	sE,00				; sE is the line remainder
+			JUMP	NZ, clear_eol_loop
+	finish_clear_line:
+			FETCH	CURSOR_LOW, scratchLOW
+			FETCH	CURSOR_HIGH, scratchHIGH
+			CALL	set_cursor
+			JUMP	exit_escape
+
+	csi_up:
+			COMPARE	s5, "A"			; we're going UP
+			JUMP	NZ, csi_down
+			FETCH	s1, param_block
+			COMPARE	s1, 00
+			JUMP	NZ, up_loop
+			ADD	s1 , 01
+	up_loop:
+			CALL	line_up
+			SUB	s1, 01
+			JUMP	NZ, up_loop
+			JUMP	exit_escape
+	csi_down:
+			COMPARE	s5,"B"
+			JUMP	NZ, csi_right
+			FETCH	s1, param_block
+			COMPARE	s1, 00
+			JUMP	NZ, down_loop
+			ADD	s1 , 01
+	down_loop:
+			CALL	line_down
+			SUB	s1, 01
+			JUMP	NZ, down_loop
+			JUMP	exit_escape
+	csi_right:
+			COMPARE	s5,"C"
+			JUMP	NZ, csi_left
+			FETCH	s0, param_block
+			COMPARE	s0, 00
+			JUMP	NZ, one_right
+			ADD	s0, 01			; if the param is zero make it one
+			STORE	s0, param_block
+	one_right:
+			CALL	right_cursor
+			FETCH	s0, param_block
+			SUB	s0, 01
+			STORE	s0, param_block
+			COMPARE s0, 00
+			JUMP	NZ, one_right
+			JUMP	exit_escape;
+
+	csi_left:		
+			COMPARE	s5,"D"
+			JUMP	NZ, csi_back_tab
+			FETCH	s0, param_block
+			COMPARE	s0, 00
+			JUMP	NZ, one_left
+			ADD	s0, 01			; if the param is zero make it one
+			STORE	s0, param_block
+	one_left:
+			CALL	left_cursor
+			FETCH	s0, param_block
+			SUB	s0, 01
+			STORE	s0, param_block
+			COMPARE s0, 00
+			JUMP	NZ, one_left
+			JUMP	exit_escape
+
+	csi_back_tab:
+			COMPARE s5,"Z"
+			JUMP	NZ, csi_tab
+			FETCH	s1, param_block
+			COMPARE	s1, 00
+			JUMP	NZ, back_tab_loop
+			ADD	s1, 01
+	back_tab_loop:
+			STORE	s1, scratchX
+			CALL	backtab
+			FETCH	s1, scratchX
+			SUB	s1, 01
+			COMPARE	s1, 00
+			JUMP	NZ, back_tab_loop
+			JUMP	exit_escape
+	csi_tab:
+			COMPARE s5,"I"
+			JUMP	NZ, csi_device_status_report
+			FETCH	s1, param_block
+			COMPARE	s1, 00
+			JUMP	NZ, tab_loop
+			ADD	s1, 01
+	tab_loop:
+			STORE	s1, scratchX
+			CALL	htab
+			FETCH	s1, scratchX
+			SUB	s1, 01
+			COMPARE	s1, 00
+			JUMP	NZ, tab_loop
+			JUMP	exit_escape
+	csi_device_status_report:
+			COMPARE s5,"n"
+			JUMP	NZ, csi_margins
+			FETCH	s0,param_block
+			COMPARE s0, 06
+			JUMP	NZ, DSR_other
+	send_position_report:			; note that this will not be echoed locally- just remote.
+			STORE	CURSOR_LOW, scratchLOW
+			STORE	CURSOR_HIGH, scratchHIGH
+			STORE	s4, scratchX
+			STORE	s5, scratchY
+			LOAD	s5, 1B
+			CALL	UART_TX		; send the CSI only to the serial port, no local echo for this
+			LOAD	s5, "["
+			CALL	UART_TX
+			CALL	get_row_column
+			STORE	sE, scratchZ
+			ADD	DIVIDEND_LOW, 01
+			ADDCY	DIVIDEND_HIGH, 00
+			CALL	send_integer
+			LOAD	s5, ";"
+			CALL	UART_TX
+			FETCH	DIVIDEND_LOW, scratchZ
+			LOAD	DIVIDEND_HIGH, 00
+			ADD	DIVIDEND_LOW, 01
+			ADDCY	DIVIDEND_HIGH, 00
+			;LOAD	DIVIDEND_HIGH, 00
+			CALL	send_integer
+			LOAD	s5, "R"
+			CALL	UART_TX
+			FETCH	CURSOR_LOW, scratchLOW
+			FETCH	CURSOR_HIGH, scratchHIGH
+			FETCH	s4, scratchX
+			FETCH	s5, scratchY
+	DSR_other:				; the host has requested a DSR but it's not a position report request, so we ignore it right now
+			JUMP	exit_escape
+
+	csi_margins:				; VT100 command set margins. we accept this command but we ignore it. it is used by the linux "resize" command.
+			COMPARE	s5, "r"
+			JUMP	NZ, csi_tilde
+			; NOP
+			JUMP	exit_escape
+	;
+	; CSI tilde is non-standard. when we're in local echo mode it's nice to have the home/end/pgup/pgdn/insert/delete keys do something useful.
+	;
+	csi_tilde:				; these are the function keys,etc. we try do to the right thing when we're in loopback mode
+			COMPARE	s5,"~"
+			JUMP	NZ, unknown_command
+			FETCH	s0, param_block
+	check_home:
+			COMPARE	s0, 01
+			JUMP	NZ, check_insert
+			CALL	home_cursor
+			JUMP	exit_escape
+	check_insert:
+			COMPARE s0, 02
+			JUMP	NZ, check_delete
+			LOAD	s1, 01
+			CALL	insert_loop
+			JUMP	exit_escape
+	check_delete:
+			COMPARE s0, 03
+			JUMP	NZ, check_end
+			LOAD	s1, 01
+			CALL	delete_loop
+			JUMP	exit_escape
+	check_end:
+			COMPARE	s0, 04
+			JUMP	NZ, check_pgup
+			CALL	end_of_line
+			JUMP	exit_escape
+	check_pgup:
+			COMPARE s0, 05
+			JUMP	NZ, check_pgdn
+			CALL	set_origin
+			JUMP	exit_escape
+	check_pgdn:
+			COMPARE s0, 06
+			JUMP	NZ, unknown_command
+			CALL	end_cursor
+			JUMP	exit_escape
+
+	unknown_command:
+		;	LOAD	s4,s5			; we used to print U but now we send the actual code
+		;	CALL	debug_s4		; comment this line out unless debugging ****
+	exit_escape:
+			AND	ANSI_FLAG_REG, ANSI_ESCAPE_CLR
+			AND	ANSI_FLAG_REG, ANSI_CSI_CLR
+			RETURN
+
+	end_param:					; OK, we've already stored the decimal digits. now it's time to convert them to hex
+			LOAD	sE, 00			; empty parameters default to zero
+			FETCH	s1, digit_counter
+			COMPARE s1, 00
+			JUMP	Z, end_digits		; no digits? just clean up with the zero value
+			LOAD	s0, digit_block
+	do_digit:					; convert decimal digits to hex value stored in sE
+			FETCH	s4, (s0)		; get the actual digit
+			SUB	s4, 30			; convert ASCII character to integer
+			ADD	sE, s4			; add the digit to the total
+			SUB	s1, 01
+			COMPARE s1, 00			; is this the last digit?
+			JUMP	Z, end_digits
+			ADD	S0, 01			; go to the next digit
+			LOAD	DIVISOR_LOW, sE		; multiplicand
+			LOAD	DIVISOR_HIGH,0A		; multiplier times 10
+			CALL	mult_8x8		; multiply the whole thing by 10, place result back in s4, ignore overflow?
+			LOAD	sE, s4
+			JUMP	do_digit
+	end_digits:					; we've done all the digits.
+			LOAD	s4,sE
+							; store the parameter here and increment the parameter counter
+			LOAD	s0, param_block
+			FETCH	s1, param_counter
+			ADD	s0,s1
+			STORE	sE, (s0)
+			LOAD	s0,00
+			STORE	s0, digit_counter	; reset the digit counter to zero
+			ADD	s1,01			; increment the parameter count
+		;	COMPARE	s1,max_param		; prevent overflow of parameter space
+		;	RETURN	NC
+			STORE	s1, param_counter
+			RETURN
+
+	invert_colors:					; swap the foreground and background colors
+			STORE	s4, scratchY
+			LOAD	s4, COLOR_REG
+			SR0	COLOR_REG
+			SR0	COLOR_REG
+			SR0	COLOR_REG
+			SR0	COLOR_REG
+			SL0	s4
+			SL0	s4
+			SL0	s4
+			SL0	s4
+			OR	COLOR_REG,s4
+			FETCH	s4, scratchY
+			RETURN
+;
+; process various control codes
+;
+;
+
+	enquiry:				; we respond to an ENQ with an ACK, but not locally
+			LOAD	s5, ACK_CHAR
+			CALL	UART_TX
+			RETURN
+	backspace:
+			COMPARE	CURSOR_LOW, 00
+			COMPARECY CURSOR_HIGH, 00
+			RETURN	Z			; do nothing if we're at the top left
+			SUB	CURSOR_LOW, 01
+			SUBCY	CURSOR_HIGH, 00
+			CALL	set_cursor
+			RETURN
+
+			JUMP	left_cursor
+	rubout:					; rubout is a destructive non-wrapping backspace.
+			CALL	left_cursor
+			LOAD	s5, 20
+			CALL	send_next	; this is recursive
+			JUMP	left_cursor
+
+			; tabs stops are every eight characters (0,8,16,24,32,40,48,56,64,72,80,88,96,104,112 (120)
+			; note that this wraps to the next line and it probably should not.. maybe? It depends on the mode.    ****
+	htab:		LOAD	s0, CURSOR_LOW
+			AND	s0, 07
+			LOAD	s1, 08
+
+			SUB	s1,s0
+			ADD	CURSOR_LOW, s1
+			ADDCY	CURSOR_HIGH, 00
+			JUMP	set_cursor
+
+	backtab:					; move to the previous tab stop (0,8...)
+			CALL	get_row_column		; sE now contains the column
+			COMPARE	sE, 00
+			RETURN	Z			; we're already at the left edge, so we do nothing
+			LOAD	s0, sE
+			AND	s0, 07			; round it to the nearest 8
+			COMPARE	s0, 00
+			JUMP	Z, full_back		; move back an entire 8 characters
+			SUB	CURSOR_LOW, s0
+			SUBCY	CURSOR_HIGH, 00
+			JUMP	set_cursor
+	full_back:
+			SUB	CURSOR_LOW, 08
+			SUBCY	CURSOR_HIGH,00
+			JUMP	set_cursor
+
+	left_cursor:
+			CALL	get_row_column
+			COMPARE	sE,00			
+			RETURN	Z			; do nothing if we're on the left edge
+			CALL	decrement_cursor
+			CALL	set_cursor
+			RETURN
+
+	right_cursor:
+			CALL	get_row_column
+			ADD	sE, 01
+			COMPARE	sE, CHAR_PER_LINE
+			RETURN	Z			; do nothing if we're on the right edge
+			CALL	advance_cursor
+			RETURN
+
+	line_up:
+			COMPARE	CURSOR_LOW, CHAR_PER_LINE
+			COMPARECY CURSOR_HIGH, 00
+			RETURN	C				; do nothing if we're on the top line
+
+			SUB	CURSOR_LOW, CHAR_PER_LINE	; move the cursor up one line, stopping at the top.
+			SUBCY	CURSOR_HIGH, 00
+			CALL	set_cursor
+			RETURN
+
+	line_down:
+			CALL	compare_cursor_last
+			RETURN	NC
+			ADD	CURSOR_LOW, CHAR_PER_LINE
+			ADDCY	CURSOR_HIGH, 00			; move the cursor down one line
+			CALL	set_cursor
+			RETURN	
+
+	line_feed:
+			CALL	compare_cursor_last
+			JUMP	NC, scroll_up
+			ADD	CURSOR_LOW, CHAR_PER_LINE
+			ADDCY	CURSOR_HIGH, 00			; move the cursor down one line
+			CALL	set_cursor
+			RETURN	
+
+	clear_start_screen:					; clear from cursor position to the start of the screen. 
+			STORE	CURSOR_LOW,scratchLOW
+			STORE	CURSOR_HIGH,scratchHIGH
+			LOAD	s4, 00
+	clear_backward:
+			OUTPUT	s4, EXTRA_PORT
+			OUTPUT	s4, CHAR_PORT
+			OUTPUT	COLOR_REG, ATTR_PORT
+			CALL	decrement_cursor
+			COMPARE	CURSOR_LOW, 00
+			COMPARECY CURSOR_HIGH, 00
+			CALL	set_cursor
+			JUMP	NZ, clear_backward
+
+			OUTPUT	DIVIDEND_LOW, EXTRA_PORT
+			OUTPUT	s4, CHAR_PORT		; do the last bit
+			OUTPUT	COLOR_REG, ATTR_PORT
+			FETCH	CURSOR_LOW, scratchLOW
+			FETCH	CURSOR_HIGH, scratchHIGH
+			CALL	set_cursor
+			RETURN
+	
+	form_feed:
+			LOAD	CURSOR_LOW,00
+			LOAD	CURSOR_HIGH,00
+	clear_end_screen:					; clear to end of screen inclusive
+			STORE	CURSOR_LOW,scratchLOW
+			STORE	CURSOR_HIGH,scratchHIGH
+			LOAD	s4,00				; fill the screen with spaces
+			FETCH	s0, MAX_LINE_LOWER
+			FETCH	s1, MAX_LINE_UPPER
+	clear_a_char:	
+			CALL	set_cursor
+			OUTPUT	s4, EXTRA_PORT
+			OUTPUT	s4, CHAR_PORT
+			OUTPUT	COLOR_REG, ATTR_PORT
+			ADD	CURSOR_LOW,01			; increment
+			ADDCY	CURSOR_HIGH,00
+			COMPARE	CURSOR_LOW, s0
+			COMPARECY CURSOR_HIGH, s1
+			JUMP	NZ, clear_a_char
+
+			FETCH	CURSOR_LOW, scratchLOW		; restore our cursor position
+			FETCH	CURSOR_HIGH, scratchHIGH
+			CALL	set_cursor			; 
+			RETURN
+
+	home_cursor:						; cursor to start of line
+			CALL	get_row_column
+			COMPARE	sE,00				; are we on the left edge? 
+			RETURN	Z
+			SUB	CURSOR_LOW, sE			; no, subtract the remainder to put us at the left edge
+			SUBCY	CURSOR_HIGH, 00
+			CALL	set_cursor
+			RETURN
+
+	set_origin:						; put cursor in upper left corner
+			LOAD	CURSOR_LOW, 00
+			LOAD	CURSOR_HIGH, 00
+			CALL	set_cursor
+			RETURN
+
+	end_cursor:						; cursor to first character of last line
+			FETCH	CURSOR_LOW, LAST_LINE_LOWER
+			FETCH	CURSOR_HIGH, LAST_LINE_UPPER
+			CALL	set_cursor
+			RETURN
+
+	end_of_line:						; cursor to end of line
+			CALL	home_cursor
+			CALL	decrement_cursor
+			ADD	CURSOR_LOW, CHAR_PER_LINE
+			ADDCY	CURSOR_HIGH, 00
+			CALL	set_cursor
+			RETURN
+
+	CRLF:
+			CALL	carriage_return
+			JUMP	cr_leftedge
+
+	carriage_return:
+			CALL	home_cursor
+			RETURN					; uncomment this for no automatic CR/LF pair
+
+	cr_leftedge:	ADD	CURSOR_LOW,CHAR_PER_LINE	; add 80 characters
+			ADDCY	CURSOR_HIGH,00
+
+			CALL	compare_cursor_max
+			JUMP	Z, cr_scroll_up
+
+	cr_regadjust:	CALL	set_cursor
+			RETURN
+
+	cr_scroll_up:
+			FETCH	CURSOR_LOW, LAST_LINE_LOWER
+			FETCH	CURSOR_HIGH, LAST_LINE_UPPER
+
+	scroll_up:	; scrolling is done in hardware with an address offset register.
+			STORE	CURSOR_LOW, scratchLOW
+			STORE	CURSOR_HIGH, scratchHIGH
+	scroll_up_plain:
+	scroll_offset:	FETCH	sE, offset_low
+			FETCH	sF, offset_high
+			ADD	sE, CHAR_PER_LINE
+			ADDCY	sF, 00
+			STORE	sE, offset_low
+			STORE	sF, offset_high
+			OUTPUT	sE, OFFSET_LSB_PORT
+			OUTPUT  sF, OFFSET_MSB_PORT
+	clear_last_line:
+			FETCH	CURSOR_LOW, LAST_LINE_LOWER
+			FETCH	CURSOR_HIGH, LAST_LINE_UPPER
+	clear_last_lines:
+			LOAD	s5, 00
+			FETCH	s0, MAX_LINE_LOWER
+			FETCH	s1, MAX_LINE_UPPER
+	clear_loop:	CALL	set_cursor
+			OUTPUT	s5, EXTRA_PORT
+			OUTPUT	s5, CHAR_PORT
+			OUTPUT	COLOR_REG, ATTR_PORT
+			ADD	CURSOR_LOW, 01
+			ADDCY	CURSOR_HIGH, 00
+			COMPARE	CURSOR_LOW, s0
+			COMPARECY CURSOR_HIGH, s1
+			JUMP	NZ, clear_loop
+	done_scrolling:	
+			FETCH	CURSOR_LOW, scratchLOW
+			FETCH	CURSOR_HIGH,scratchHIGH
+			CALL	set_cursor
+			RETURN
+
+	scroll_down:
+			STORE	CURSOR_LOW, scratchLOW
+			STORE	CURSOR_HIGH, scratchHIGH
+	scroll_down_offset:
+			FETCH	sE, offset_low
+			FETCH	sF, offset_high
+			SUB	sE, CHAR_PER_LINE
+			SUBCY	sF, 00
+			STORE	sE, offset_low
+			STORE	sF, offset_high
+			OUTPUT	sE, OFFSET_LSB_PORT
+			OUTPUT	sF, OFFSET_MSB_PORT
+	clear_first_line:
+			LOAD	CURSOR_LOW, 00
+			LOAD	CURSOR_HIGH, 00
+			LOAD	s5, 00
+	clear_first_loop:
+			CALL	set_cursor
+			OUTPUT	s5, EXTRA_PORT
+			OUTPUT	s5, CHAR_PORT
+			OUTPUT	COLOR_REG, ATTR_PORT
+			ADD	CURSOR_LOW, 01
+			ADDCY	CURSOR_HIGH, 00
+			COMPARE	CURSOR_LOW, CHAR_PER_LINE
+			COMPARECY CURSOR_HIGH, 00
+			JUMP	NZ, clear_first_loop
+	done_scrolling_up:
+			FETCH	CURSOR_LOW, scratchLOW
+			FETCH	CURSOR_HIGH, scratchHIGH
+			CALL	set_cursor
+			RETURN
+
+	clear_current_line:
+			LOAD	s0, CHAR_PER_LINE
+			LOAD	s1, 00
+	clear_current_lines:
+			LOAD	s5, 00
+	clear_line_loop:
+			CALL	set_cursor
+			OUTPUT	s5, EXTRA_PORT
+			OUTPUT	s5, CHAR_PORT
+			OUTPUT	COLOR_REG, ATTR_PORT
+			ADD	CURSOR_LOW, 01
+			ADDCY	CURSOR_HIGH, 00
+			SUB	s0, 01
+			SUBCY	s1, 00
+			COMPARE	s0, 00
+			COMPARECY s1, 00
+			JUMP	NZ, clear_line_loop
+
+			FETCH	CURSOR_LOW, scratchLOW
+			FETCH	CURSOR_HIGH, scratchHIGH
+			CALL	set_cursor
+			RETURN
+
+	ring_bell:
+		;	RETURN	; uncomment this line to disable the bell ****
+			STORE	CURSOR_LOW, scratchLOW
+			STORE	CURSOR_HIGH, scratchHIGH
+			STORE	COLOR_REG, scratchX
+
+			CALL	invert_screen
+			CALL	delay_100ms	; this might be too long ****
+			CALL	invert_screen
+
+			FETCH	CURSOR_LOW, scratchLOW
+			FETCH	CURSOR_HIGH, scratchHIGH
+			FETCH	COLOR_REG, scratchX
+			CALL	set_cursor
+			RETURN
+
+	invert_screen:
+			LOAD	CURSOR_LOW, 00
+			LOAD	CURSOR_HIGH, 00
+	bell_loop:
+			CALL	set_cursor
+			INPUT	COLOR_REG, ATTR_READ_PORT
+			CALL	invert_colors
+			OUTPUT	COLOR_REG, ATTR_PORT
+			ADD	CURSOR_LOW, 01
+			ADDCY	CURSOR_HIGH, 00
+			CALL	compare_cursor_max
+			JUMP	NZ, bell_loop
+			RETURN
+
+	compare_cursor_max:
+			STORE	s0, scratchT
+			STORE	s1, scratchU
+			FETCH	s0, MAX_LINE_LOWER
+			FETCH	s1, MAX_LINE_UPPER
+			COMPARE	CURSOR_LOW, s0
+			COMPARECY CURSOR_HIGH, s1
+			FETCH	s0, scratchT
+			FETCH	s1, scratchU
+			RETURN
+
+	compare_cursor_last:
+			STORE	s0, scratchT
+			STORE	s1, scratchU
+			FETCH	s0, LAST_LINE_LOWER
+			FETCH	s1, LAST_LINE_UPPER
+			COMPARE	CURSOR_LOW, s0
+			COMPARECY CURSOR_HIGH, s1
+			FETCH	s0, scratchT
+			FETCH	s1, scratchU
+			RETURN
+
+	test_pattern: 					; dumps all 256 characters to the console in RAW mode.
+			LOAD	s5,00
+	ascii_set:	
+			STORE	s5, scratchQ
+			CALL	raw_char_out
+			FETCH	s5, scratchQ
+			ADD	s5,01
+			COMPARE	s5,00
+			RETURN	Z
+			JUMP	ascii_set
+
+
+; print_string:
+; sends NULL terminated STRING to the HDMI character display
+; string pointer is passed in s8s9
+; returns with s8s9 pointing to NUL terminator at end of string
+; does not affect other registers
+	print_string:	CALL@ (DIVISOR_LOW,DIVISOR_HIGH)
+                    	COMPARE s5, 00                  ;terminate on NUL character
+                    	RETURN Z
+			STORE	DIVISOR_LOW,scratchLOW
+			STORE	DIVISOR_HIGH,scratchHIGH
+			CALL send_next                  	
+			FETCH	DIVISOR_LOW,scratchLOW
+			FETCH	DIVISOR_HIGH,scratchHIGH
+                    	ADD DIVISOR_HIGH, 1'd
+                    	ADDCY DIVISOR_LOW, 0'd
+                    	JUMP print_string
+
+; hex_byte
+; echo the 8 bit value of s4 to the serial port in hexadecimal 
+; followed by a space (three characters total are sent)
+; the s5 register is corrupted by this function
+     	hex_byte:
+			LOAD s5, s4                     ;isolate upper nibble
+			SR0 s5
+			SR0 s5
+			SR0 s5
+			SR0 s5
+			CALL hex_to_text               ; convert to ASCII
+			CALL UART_TX                    ;send upper digit to UART
+			LOAD s5, s4                     ;isolate lower nibble
+			AND s5, 0F
+			CALL hex_to_text               ; convert to ASCII
+			CALL UART_TX                    ;send lower digit to UART
+                	RETURN 
+;
+; debug hex dumps a hex value in s4 to the character display
+;
+	debug_hex:
+			LOAD	s5, "{"
+			CALL	raw_char_out
+			CALL	print_hex
+			LOAD	s5, "}"
+			CALL	raw_char_out
+                	RETURN 
+
+	print_hex:
+			LOAD s5, s4                     ;isolate upper nibble
+			SR0 s5
+			SR0 s5
+			SR0 s5
+			SR0 s5
+			CALL hex_to_text               ; convert to ASCII
+			CALL raw_char_out
+			LOAD s5, s4                     ;isolate lower nibble
+			AND s5, 0F
+			CALL hex_to_text               ; convert to ASCII
+			CALL raw_char_out
+			RETURN
+
+			; Convert value 00 to 0F provided in 's5' into ASCII character in 's5'
+        	 	; Register used s5
+	hex_to_text:	SUB s5, 0A                      ;test if value is in range 0 to 9
+                    	JUMP C, number_to_char
+                    	ADD s5, 07                      ;ASCII char A to F in range 41 to 46
+	number_to_char:	ADD s5, 3A                      ;ASCII char 0 to 9 in range 30 to 40
+                    	RETURN 
+               
+
+			STRING hello$, "QuackTerm V1.02  Mode "
+
+	debug_s4:
+			LOAD	s5,"<"
+			CALL	raw_char_out
+			STORE	s4, scratchLOW
+			FETCH	s4, param_block
+			CALL	debug_hex
+			FETCH	s4, scratchLOW
+			LOAD	s5,s4
+			CALL	raw_char_out
+			LOAD	s5,">"
+			CALL	raw_char_out
+			RETURN
+
+	debug_s4e:
+			LOAD	s5, "{"
+			CALL	raw_char_out
+			LOAD	s5,s4
+			CALL	raw_char_out
+			LOAD	s5, "}"
+			CALL	raw_char_out
+			RETURN
+
+	hello_msg:	LOAD&RETURN s5, hello$
+			;LOAD&RETURN s5, CR
+			LOAD&RETURN s5, NUL
+
+
+                
+	get_row_column_plus:
+			LOAD	DIVIDEND_LOW, CURSOR_LOW
+			LOAD	DIVIDEND_HIGH, CURSOR_HIGH
+			ADD	DIVIDEND_LOW, 01
+			ADDCY	DIVIDEND_HIGH, 00
+			JUMP	finish_row_column
+	get_row_column:						;returns the ROW in DIVIDEND_LOW and the COLUMN in sE
+			LOAD	DIVIDEND_LOW, CURSOR_LOW
+			LOAD	DIVIDEND_HIGH, CURSOR_HIGH
+	finish_row_column:
+			LOAD	DIVISOR_HIGH, CHAR_PER_LINE
+			LOAD	DIVISOR_LOW, 00
+			JUMP	divide_16bit_by_any	; sE is now the line (column) position
+			; parasitic RETURN
+
+; Divide 16-bit binary integer
+;
+; The value to be divided by should be provided in register set [DIVIDEND_HIGH,DIVIDEND_LOW].
+; The divisor should be placed in DIVISOR_LOW,DIVISOR_HIGH
+; The routine will return the integer result [DIVIDEND_HIGH,s2]/80 back in[DIVIDEND_HIGH,DIVIDEND_LOW]
+; with any remainder in register sE.
+; Registers used s0,DIVIDEND_LOW,DIVIDEND_HIGH,DIVISOR_LOW,DIVISOR_HIGH,sE,sF
+;
+; NOTE: this is NOT a general purpose divide function. It only works for a narrow range of values.
+;
+
+divide_16bit_by_any:	LOAD sE, DIVIDEND_LOW                     ;copy input value into [CURSOR_LOW,sA]
+                   	LOAD sF, DIVIDEND_HIGH
+                   	LOAD DIVIDEND_LOW, 00                     ;clear division result
+                   	LOAD DIVIDEND_HIGH, 00
+                   	LOAD s0, 9'd                   ;9 subtract and shift iterations to be performed (0x50 uses 7 bits for a total of 16)
+							; a general purpose subtract function would perform all 16 shifts and would have the 
+							; 8-bit divisor loaded straight into s8 with s9 being 00 (the MSB)
+        div_loop:	SUB sE,DIVISOR_LOW                      ;perform 16-bit subtract [CURSOR_LOW,sA]-[DIVISOR_HIGH,DIVISOR_LOW]
+                   	SUBCY sF,DIVISOR_HIGH
+                   	JUMP C, div_restore           ;if carry then could not subtract from total
+                   	SL1 DIVIDEND_LOW                          ;shift '1' into result because subtract ok
+                   	JUMP div_shifts
+     div_restore:	ADD sE,DIVISOR_LOW                      ;perform 16-bit addition [CURSOR_LOW,sA]+[DIVISOR_HIGH,DIVISOR_LOW]
+                   	ADDCY sF,DIVISOR_HIGH                    ;to restore total
+                   	SL0 DIVIDEND_LOW                ;shift '0' into result because could no subtract
+      div_shifts:	SLA DIVIDEND_HIGH               ;complete 16-bit shift left into [DIVIDEND_HIGH,s2]
+                   	SR0 DIVISOR_HIGH                          ;divide '10' value by 2 (shift right 1 place)
+                   	SRA DIVISOR_LOW
+                   	SUB s0, 01                      ;count iterations
+                   	RETURN Z                        ;on return the remainder of division is in sA
+                   	JUMP div_loop
+
+
+; delay for one second
+;1s is 50,000,000 clock cycles requiring 6,250,000 delay iterations
+; (5F5E10)
+;          delay_1s: LOAD DIVIDEND_LOW, 5F
+;                    LOAD s1, 5E
+;                    LOAD s0, 10
+;                    JUMP software_delay
+                    ;
+                    ; The delay loop decrements [DIVIDEND_LOW,s1,s0] until it reaches zero
+                    ; Each decrement cycle is 4 instructions which is 8 clock cycles (160ns at 50MHz)
+ 
+
+; 100 milliseconds is 0x98968
+;
+;
+	delay_100ms:
+			LOAD	DIVIDEND_LOW, 09
+			LOAD	s1, 89
+			LOAD	s0, 68
+			JUMP	software_delay
+
+; 2 ms is 2 milliseconds, requiring
+; 12,500 delay iterations (0030D4)
+; 4  ms is 61A8
+;
+;	delay_4ms:
+;			LOAD	DIVIDEND_LOW, 00
+;			LOAD	s1, 61
+;			LOAD	s0, A8
+;			JUMP	software_delay
+                   ;
+    software_delay: SUB s0, 1'd
+                    SUBCY s1, 0'd
+                    SUBCY DIVIDEND_LOW, 0'd
+                    JUMP NZ, software_delay
+                    RETURN 
+
+; Multiplier Routine (8-bit x 8-bit = 16-bit product)
+; ==================================================
+; Shift and add algorithm
+;
+	mult_8x8:
+			NAMEREG DIVISOR_LOW, multiplicand	; preserved
+			NAMEREG DIVISOR_HIGH, multiplier	; preserved
+			NAMEREG DIVIDEND_LOW, bit_mask		; modified
+			NAMEREG DIVIDEND_HIGH, result_msb	; most-significant byte (MSB) of result, modified
+			NAMEREG s4, result_lsb			; least-significant byte (LSB) of result, modified
+;
+			LOAD bit_mask, 01			; start with least-significant bit (lsb)
+			LOAD result_msb, 00			; clear product MSB
+			LOAD result_lsb, 00			; clear product LSB (not required)
+;
+; loop through all bits in multiplier
+	mult_loop:
+			TEST multiplier, bit_mask		; check if bit is set
+			JUMP Z, no_add				; if bit is not set, skip addition
+;
+			ADD result_msb, multiplicand		; addition only occurs in MSB
+;
+	no_add:		SRA result_msb				; shift MSB right, CARRY into bit 7,
+								; lsb into CARRY
+			SRA result_lsb				; shift LSB right,
+								; lsb from result_msb into bit 7
+;
+			SL0 bit_mask				; shift bit_mask left to examine
+								; next bit in multiplier
+;
+			JUMP NZ, mult_loop			; if all bit examined, then bit_mask = 0
+
+			RETURN
+;
+; the following code uses normal register names, it's taken from the Xilinx example more or less
+; so we use NAMEREG to restore our registers to their original names more or less
+
+
+			NAMEREG multiplicand, 	DIVISOR_LOW
+			NAMEREG multiplier, 	DIVISOR_HIGH
+			NAMEREG bit_mask,	s2
+			NAMEREG result_msb, 	s3
+			NAMEREG result_lsb, 	s4
+
+			NAMEREG	COLOR_REG, s6
+
+			NAMEREG	CURSOR_LOW, sB
+			NAMEREG CURSOR_HIGH, sA
+
+			NAMEREG	DIVISOR_LOW, s8
+			NAMEREG DIVISOR_HIGH, s9
+;
+; sends a 16 bit integer value in s2s3 to the serial port in decimal format.
+;
+;;
+
+      send_integer: COMPARE s2, 00                  ;test for special case of zero
+                    COMPARECY s3, 00
+                    JUMP Z, zero_integer
+                    ;
+                    CALL integer16_to_BCD           ;Convert to BCD in SPM
+                    ;
+                    LOAD sE, decimal4               ;pointer to BCD in SPM
+                    LOAD sF, 0'd                    ;flag for leading zero blanking
+ send_integer_loop: FETCH s5, (sE)
+                    ADD sF, s5                      ;make sF non-zero to stop blanking
+                    COMPARE sF, 0'd                 ;Test for blanking
+                    JUMP Z, next_int_digit
+                    ADD s5, "0"                     ;convert to ASCII
+                    CALL UART_TX                    ;send digit
+    next_int_digit: COMPARE sE, decimal0
+                    RETURN Z
+                    SUB sE, 1'd                     ;move pointer to next digit
+                    JUMP send_integer_loop
+                    ;
+      zero_integer: LOAD s5, "0"                    ;special response for zero
+                    CALL UART_TX
+                    RETURN 
+
+
+	print_integer:
+			COMPARE s2, 00                  ;test for special case of zero
+			COMPARECY s3, 00
+			JUMP Z, zero_printeger
+			CALL integer16_to_BCD           ;Convert to BCD in SPM
+			LOAD sE, decimal4               ;pointer to BCD in SPM
+			LOAD sF, 0'd                    ;flag for leading zero blanking
+	print_integer_loop:
+			FETCH s5, (sE)
+			ADD sF, s5                      ;make sF non-zero to stop blanking
+			COMPARE sF, 0'd                 ;Test for blanking
+			JUMP Z, next_print_digit
+			ADD s5, "0"                     ;convert to ASCII
+			CALL send_next
+	next_print_digit:
+			COMPARE sE, decimal0
+			RETURN Z
+			SUB sE, 1'd                     ;move pointer to next digit
+			JUMP print_integer_loop
+	zero_printeger:
+			LOAD s5, "0"                    ;special response for zero
+			CALL send_next
+			RETURN 
+
+
+  integer16_to_BCD: LOAD s4, decimal0               ;pointer for LS-Digit in scratch pad memory
+   int_to_BCD_loop: CALL divide_16bit_by_10
+                    STORE sE, (s4)                  ;remainder is the digit value
+                    COMPARE s4, decimal4            ;test for MS-Digit completed
+                    RETURN Z
+                    ADD s4, 1'd                     ;advance pointer to next digit
+                    JUMP int_to_BCD_loop
+                    ;
+                    ; Divide 16-bit binary integer by 10
+                    ;
+                    ; The value to be divided by 10 should be provided in register set [s3,s2].
+                    ; The routine will return the integer result [s3,s2]/10 back in[s3,s2]
+                    ; with any remainder in (0 to 9) in register sA.
+                    ;
+                    ; Registers used s0,s2,s3,s8,s9,sA,sB
+                    ;
+divide_16bit_by_10: LOAD sE, s2                     ;copy input value into [sB,sA]
+                    LOAD sF, s3
+                    LOAD s2, 00                     ;clear division result
+                    LOAD s3, 00
+                    LOAD s9, A0                     ;initialise [s9,s8] with '10' in MSBs
+                    LOAD s8, 00
+                    LOAD s0, 13'd                   ;13 subtract and shift iterations to be performed
+        div10_loop: SUB sE, s8                      ;perform 16-bit subtract [sB,sA]-[s9,s8]
+                    SUBCY sF, s9
+                    JUMP C, div10_restore           ;if carry then could not subtract from total
+                    SL1 s2                          ;shift '1' into result because subtract ok
+                    JUMP div10_shifts
+     div10_restore: ADD sE, s8                      ;perform 16-bit addition [sB,sA]+[s9,s8]
+                    ADDCY sF, s9                    ;to restore total
+                    SL0 s2                          ;shift '0' into result because could no subtract
+      div10_shifts: SLA s3                          ;complete 16-bit shift left into [s3,s2]
+                    SR0 s9                          ;divide '10' value by 2 (shift right 1 place)
+                    SRA s8
+                    SUB s0, 01                      ;count iterations
+                    RETURN Z                        ;on return the remainder of division is in sA
+                    JUMP div10_loop
+
+	CONSTANT UART_status_port, 00             ; Read status
+	CONSTANT UART_Tx_full, 00000100'b         ; full - bit2
+	CONSTANT UART_TX6_output_port, 01
+	CONSTANT reset_UART_port, 01
+	CONSTANT UART_reset, 00000011'b           ; reset Tx and Rx
+	CONSTANT UART_operate, 00000000'b         ; Tx and Rx free to operate
+
+	reset_UART_macros:
+			OUTPUTK UART_reset, reset_UART_port
+			OUTPUTK UART_operate, reset_UART_port
+			RETURN 
+
+
+	UART_TX:
+			INPUT s0, UART_status_port                ;Check if buffer is full
+			TEST s0, UART_Tx_full
+			JUMP NZ, UART_TX                          ;wait if full
+			OUTPUT s5, UART_TX6_output_port
+			RETURN 
+
+; End of Program
+
+

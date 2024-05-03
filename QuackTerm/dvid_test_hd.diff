@@ -1,0 +1,99 @@
+78,95c78,89
+<    COMPONENT CGRAM
+< 	PORT(
+< 		CGRAM_DI_CPU		: IN std_logic_vector(7 downto 0);
+< 		CGRAM_DO_CPU		: OUT std_logic_vector(7 downto 0);
+< 		CGRAM_ADDR_CPU		: IN std_logic_vector(10 downto 0);
+< 		CGRAM_WE_CPU		: IN STD_LOGIC_VECTOR(0 downto 0);
+< 		CGRAM_CLK_CPU		: IN std_logic;
+< 		CGRAM_EN_CPU		: IN std_logic;
+< 
+< 		CGRAM_DI_VGA		: IN std_logic_vector(7 downto 0);
+< 		CGRAM_DO_VGA		: OUT std_logic_vector(7 downto 0);
+< 		CGRAM_ADDR_VGA		: IN std_logic_vector(10 downto 0);
+< 		CGRAM_WE_VGA		: IN STD_LOGIC_VECTOR(0 downto 0);
+< 		CGRAM_CLK_VGA		: IN std_logic;
+< 		CGRAM_EN_VGA		: IN std_logic;
+< 
+< 		REGCE_CPU		: in STD_LOGIC;
+< 		RST_CPU			: in STD_LOGIC;
+---
+> 	COMPONENT PS2FIFO
+> 	  PORT (
+>     clk : IN STD_LOGIC;
+>     rst : IN STD_LOGIC;
+>     din : IN STD_LOGIC_VECTOR(7 DOWNTO 0);
+>     wr_en : IN STD_LOGIC;
+>     rd_en : IN STD_LOGIC;
+>     dout : OUT STD_LOGIC_VECTOR(7 DOWNTO 0);
+>     full : OUT STD_LOGIC;
+>     empty : OUT STD_LOGIC
+>   );
+>   END COMPONENT;
+97,101d90
+< 		REGCE_VGA		: in STD_LOGIC;
+< 		RST_VGA			: in STD_LOGIC
+< 
+< 		);
+< 	END COMPONENT;
+374c363,364
+< 	signal ps2_code_new		: STD_LOGIC;
+---
+> 	signal ps2_code_new		: STD_LOGIC :='0';
+> 	signal ps2_code_old		: STD_LOGIC :='0';
+376a367,374
+> 	signal ps2_fifo_din : std_logic_vector(7 downto 0) := (others =>'0');
+> 	signal ps2_fifo_dout : std_logic_vector(7 downto 0) := (others =>'0');
+> 	signal ps2_fifo_rd : std_logic := '0';
+> 	signal ps2_fifo_wr : std_logic := '0';
+> 	signal ps2_fifo_full : std_logic := '0';
+> 	signal ps2_fifo_empty : std_logic := '0';
+> 
+> 
+529c527
+< 		elsif port_id=x"05" then
+---
+> 		elsif port_id=x"05" then			-- read CG RAM port
+530a529,533
+> 		elsif port_id=x"06" then			-- read PS/2 keyboard data
+> 			in_port <= ps2_fifo_dout;
+> 		elsif port_id=x"07" then			-- read PS/2 keyboard status (bit 0 is the FIFO empty flag)
+> 			in_port(0) <= ps2_fifo_empty;
+> 			in_port(1) <= ps2_fifo_full;
+531a535
+> 		
+535a540,545
+> 		-- generate FIFO read pulse following read from port address 06
+> 		if (read_strobe = '1') and (port_id = x"06") then
+> 			ps2_fifo_rd <= '1';
+> 		else
+> 			ps2_fifo_rd <= '0';	
+> 		end if;
+570c580
+< 	elsif port_id=x"04" then -- port 04 is the CG data address
+---
+> 	elsif port_id=x"04" then -- port 04 is the CG write data 
+597a608,609
+> 
+> 
+706,707c718,719
+<     ps2_code_new=>ps2_code_new,
+<     ps2_code  => ps2_code
+---
+>     ps2_code_new=> ps2_code_new, 	--ps2_code_new,
+>     ps2_code  => ps2_fifo_din 		--ps2_code
+709a722,735
+> 
+> I_PS2FIFO : PS2FIFO
+>   PORT MAP(
+>     clk		=> clk_fifty,
+>     rst		=> '0', 
+>     din		=> ps2_fifo_din,
+>     wr_en	=> ps2_fifo_wr,
+>     rd_en	=> ps2_fifo_rd,
+>     dout		=> ps2_fifo_dout,
+>     full		=> ps2_fifo_full,
+>     empty	=> ps2_fifo_empty
+>   );
+> 
+> 

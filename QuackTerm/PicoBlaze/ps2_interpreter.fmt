@@ -1,0 +1,1367 @@
+                               ;Copyright (C) 2017 Erik C. Quackenbush erikcq@quackenbush.com
+                               ;
+                               ; this is PS/2 to ASCII keyboard decoder
+                               ; it is written for the Xilinx Picoblaze-6 soft core processor.
+                               ;
+                               ; these are the extended key codes. They're prefixed with 0xE0
+                               ; from the PS/2 keyboard
+                               CONSTANT KEY_RELEASE_PREFIX, F0
+                               CONSTANT EXTKEY_PREFIX, E0
+                               CONSTANT BREAK_PREFIX, E1              ; pause break key sneds an E1 code prefix followed by two codes
+                               CONSTANT PAUSE_BREAK, 14               ; left control
+                               CONSTANT PAUSE_BREAK2, 77              ; numlock
+                               CONSTANT EXTKEY_END, 69
+                               CONSTANT EXTKEY_LEFT, 6B
+                               CONSTANT EXTKEY_HOME, 6C
+                               CONSTANT EXTKEY_INSERT, 70
+                               CONSTANT EXTKEY_DELETE, 71
+                               CONSTANT EXTKEY_DOWN, 72
+                               CONSTANT EXTKEY_RIGHT, 74
+                               CONSTANT EXTKEY_UP, 75
+                               CONSTANT EXTKEY_PGDN, 7A
+                               CONSTANT EXTKEY_PGUP, 7D
+                               CONSTANT EXTKEY_KEYPAD_ENTER, 5A       ; keypad enter- this is an EXTKEY unlike the other KEYPAD keys (the non ext-key is the standard ENTER)
+                               CONSTANT EXTKEY_KEYPAD_SLASH, 4A       ; keypad forward slash (divide). This is also an EXTKEY (the non ext-key is the standard slash)
+                               CONSTANT EXTKEY_WINDOWS, 1F
+                               CONSTANT EXTKEY_MENU, 2F
+                               ; CONSTANT EXTKEY_WINDOWS, 5B
+                               ; CONSTANT EXTKEY_MENU,  5C
+                               CONSTANT EXTKEY_RIGHT_ALT, 11
+                               CONSTANT EXTKEY_RIGHT_CONTROL, 14
+                               CONSTANT EXTKEY_PRINT_SCREEN_SHIFT, 12 ; two codes are sent when you press print screen: left shift
+                               CONSTANT EXTKEY_PRINT_SCREEN, 7C       ; asterisk on numeric keypad
+                               CONSTANT KEYPAD_END, 69
+                               CONSTANT KEYPAD_LEFT, 6B
+                               CONSTANT KEYPAD_HOME, 6C
+                               CONSTANT KEYPAD_INSERT, 70
+                               CONSTANT KEYPAD_DELETE, 71
+                               CONSTANT KEYPAD_DOWN, 72
+                               CONSTANT KEYPAD_DEAD, 73               ; this is the 5 key.
+                               CONSTANT KEYPAD_RIGHT, 74
+                               CONSTANT KEYPAD_UP, 75
+                               CONSTANT KEYPAD_PGDN, 7A
+                               CONSTANT KEYPAD_PGUP, 7D
+                               ; these are the windows multimedia keys which can be found on some keyboards.
+                               ; they are all extended keys (prefixed by E0)
+                               ;
+                               ; some of these keys are not present on my HP KB-0630 (those with no comment semicolon)
+                               ; others are specific to HP as an OEM and are not standard.
+                               ;
+                               ; The only one I have implemented is "sleep", which sends a code to the host.
+                               CONSTANT MEDIA_WWW_SEARCH, 10          ;
+                               CONSTANT MEDIA_PREVIOUS_TRACK, 15      ;
+                               CONSTANT MEDIA_WWW_FAVORITES, 18
+                               CONSTANT MEDIA_EJECT_2, 1E             ; HP OEM
+                               CONSTANT MEDIA_WWW_REFRESH, 20
+                               CONSTANT MEDIA_VOLUME_DOWN, 21         ;
+                               CONSTANT MEDIA_MUTE, 23                ;
+                               CONSTANT MEDIA_WWW_STOP, 28
+                               CONSTANT MEDIA_CALCULATOR, 2B
+                               CONSTANT MEDIA_PLUS, 2C                ; HP OEM
+                               CONSTANT MEDIA_DOT, 2E                 ; HP OEM
+                               CONSTANT MEDIA_WWW_FORWARD, 30
+                               CONSTANT MEDIA_VOLUME_UP, 32           ;
+                               CONSTANT MEDIA_GLOBE, 33               ; HP OEM
+                               CONSTANT MEDIA_PLAY_PAUSE, 34          ;
+                               CONSTANT MEDIA_POWER, 37
+                               CONSTANT MEDIA_WWW_BACK, 38
+                               CONSTANT MEDIA_WWW_HOME, 3A
+                               CONSTANT MEDIA_AUDIO_STOP, 3B          ;
+                               CONSTANT MEDIA_SLEEP, 3F               ;
+                               CONSTANT MEDIA_MY_COMPUTER, 40
+                               CONSTANT MEDIA_EJECT_1, 44             ; HP OEM
+                               CONSTANT MEDIA_EMAIL, 48               ;
+                               CONSTANT MEDIA_QUESTION, 4B            ; HP OEM
+                               CONSTANT MEDIA_NEXT_TRACK, 4D          ;
+                               CONSTANT MEDIA_MEDIA_SELECT, 50
+                               CONSTANT MEDIA_WAKE, 5E
+                               ;
+                               ; these are the modifier keys. The alt and control keys can optionally be prefixed with 0xE0
+                               ; from the PS/2 keyboard which indicates that it's the right ctrl or right alt key.
+                               CONSTANT KEY_LEFT_SHIFT, 12
+                               CONSTANT KEY_RIGHT_SHIFT, 59
+                               CONSTANT KEY_LEFT_CONTROL, 14
+                               CONSTANT KEY_LEFT_ALT, 11
+                               CONSTANT KEY_RIGHT_CONTROL, 14         ; same as left but with extended flag set
+                               CONSTANT KEY_RIGHT_ALT, 11             ; same as left but with extended flag set
+                               CONSTANT KEY_CAPSLOCK, 58
+                               CONSTANT KEY_NUMLOCK, 77
+                               CONSTANT KEY_SCROLLLOCK, 7E
+                               ; these are the function keys
+                               CONSTANT KEY_F1, 05
+                               CONSTANT KEY_F2, 06
+                               CONSTANT KEY_F3, 04
+                               CONSTANT KEY_F4, 0C
+                               CONSTANT KEY_F5, 03
+                               CONSTANT KEY_F6, 0B
+                               CONSTANT KEY_F7, 83
+                               CONSTANT KEY_F8, 0A
+                               CONSTANT KEY_F9, 01
+                               CONSTANT KEY_F10, 09
+                               CONSTANT KEY_F11, 78
+                               CONSTANT KEY_F12, 07
+                               ; RAM ADDRESS assignments
+                               ; this is our memory map.
+                               CONSTANT LED_flags, 30
+                               CONSTANT scratchW, 3C
+                               CONSTANT scratchX, 3D
+                               CONSTANT scratchY, 3E
+                               CONSTANT scratchZ, 3F                  ; the top of memory unless we change the picoblaze-6 generic in VHDL
+                               CONSTANT CAPS_LOCK_LED, 08             ; these bits define the state of the keyboard LEDs
+                               CONSTANT NUM_LOCK_LED, 10
+                               CONSTANT SCROLL_LOCK_LED, 20
+                               CONSTANT DUMMY_LED, 40
+                               CONSTANT CAPS_LOCK_LED_CLR, F7
+                               CONSTANT NUM_LOCK_LED_CLR, EF
+                               CONSTANT SCROLL_LOCK_LED_CLR, DF
+                               CONSTANT DUMMY_LED_CLR, BF
+                               ; special control keys (some are also shifted)
+                               ; these control key combinations produce the missing control characters
+                               ; after control-Z.
+                               ;
+                               ; ctrl-@ 00 (NULL) control at sign
+                               ; ctrl-[ 1B (escape) control open bracket
+                               ; ctrl-\ 1C control backslash
+                               ; ctrl-] 1D control close bracket
+                               ; ctrl-^ 1E control caret
+                               ; ctrl-_ 1F control underscore
+                               ; ctrl-? 7F (delete) control question mark
+                               ; these are the I/O port addresses.
+                               ;
+                               CONSTANT MSB_PORT, 02                  ; write the MSB of the cursor position here
+                               CONSTANT LSB_PORT, 03                  ; write the LSB of the cursor position here
+                               CONSTANT CHAR_PORT, 04                 ; write the character value here
+                               CONSTANT CHAR_READ_PORT, 05            ; read the character value here
+                               CONSTANT PS2_READ_PORT, 06             ; read scan codes from the PS/2 keyboard here
+                               CONSTANT PS2_STATUS_PORT, 07           ; bit(0) is empty, bit(1) is full (FIFO status)
+                               CONSTANT ATTR_PORT, 09                 ; write to this to set the colors
+                               CONSTANT ATTR_READ_PORT, 0A            ; read from this to see the colors
+                               CONSTANT MODE_PORT, 0B                 ; sets the video mode bits (120/80,50/25,50/67)
+                               CONSTANT UART_STATUS_PORT, 0C
+                               CONSTANT UART_READ_FIFO_PORT, 0D
+                               CONSTANT UART_FIFO_EMPTY, 01
+                               CONSTANT UART_FIFO_FULL, 02
+                               CONSTANT OFFSET_MSB_PORT, 0E           ; scrolling offset gets added to the cursor address
+                               CONSTANT OFFSET_LSB_PORT, 0F           ; so try to set these to a multiple of CHAR_PER_LINE
+                               CONSTANT TYPEMATIC_PORT, 10            ; sets the keyboard typematic rate
+                               ; KEY_FLAG_REG contains these keyboard state flag bits
+                               ; OR these with the register to set the bits
+                               CONSTANT KEY_RELEASE, 01               ; did this key have a release (F0) prefix?
+                               CONSTANT LEFT_SHIFT, 02
+                               CONSTANT RIGHT_SHIFT, 04
+                               CONSTANT EITHER_SHIFT, 06
+                               CONSTANT LEFT_ALT, 08
+                               CONSTANT RIGHT_ALT, 10
+                               CONSTANT EITHER_ALT, 18
+                               CONSTANT LEFT_CONTROL, 20
+                               CONSTANT RIGHT_CONTROL, 40
+                               CONSTANT EITHER_CONTROL, 60
+                               CONSTANT ANY_MODIFIER, 7E              ; at least one of the modifier keys is depressed, poor thing
+                               CONSTANT EXTENDED, 80                  ; is this an extended code prefixed by 0xE0?
+                               ; AND these with the register to clear the bits
+                               CONSTANT KEY_RELEASE_CLR, FE
+                               CONSTANT LEFT_SHIFT_CLR, FD
+                               CONSTANT RIGHT_SHIFT_CLR, FB
+                               CONSTANT LEFT_ALT_CLR, F7
+                               CONSTANT RIGHT_ALT_CLR, EF
+                               CONSTANT LEFT_CONTROL_CLR, DF
+                               CONSTANT RIGHT_CONTROL_CLR, BF
+                               CONSTANT EXTENDED_CLR, 7F
+                               CONSTANT RELEASE_EXT_CLR, 7E           ; clear both the extended and release flags
+                               ; MODE_FLAG_REG contains these command processing state flag bigs
+                               ; OR these with the register to set the bits
+                               CONSTANT MODE_DEBUG, 01                ; we output characters RAW for debugging
+                               CONSTANT MODE_NETHACK, 02              ; numeric keypad is in nethack navigation mode
+                               CONSTANT MODE_BREAK, 04                ; used by PAUSE-BREAK key
+                               CONSTANT MODE_08, 08
+                               CONSTANT MODE_10, 10
+                               CONSTANT MODE_SCROLL_LOCK, 20          ; state of the scroll lock flag (toggles)
+                               CONSTANT MODE_NUM_LOCK, 40             ; state of the num lock flag (toggles)
+                               CONSTANT MODE_CAPS_LOCK, 80            ; currently unused
+                               ; AND these with the register to clear the bits
+                               CONSTANT MODE_DEBUG_CLR, FF
+                               CONSTANT MODE_NETHACK_CLR, FE
+                               CONSTANT MODE_BREAK_CLR, FB
+                               CONSTANT MODE_08_CLR, F7
+                               CONSTANT MODE_10_CLR, EF
+                               CONSTANT MODE_SCROLL_LOCK_CLR, DF
+                               CONSTANT MODE_NUM_LOCK_CLR, BF
+                               CONSTANT MODE_CAPS_LOCK_CLR, 7F
+                               CONSTANT META_CHAR, 9E                 ; special char used for in band signalling to the terminal
+                               ;
+                               ; registers s0 and s1 are used for local scratch.
+                               ; registers s4 and s5 are used for parameters
+                               ;
+                               ; registers sE is used as the column position (remainder)
+                               ; registers sE and sF are used for copies.
+                               ;
+                               NAMEREG s7, KEY_FLAG_REG
+                               NAMEREG s8, TABLE_LOW
+                               NAMEREG s9, TABLE_HIGH
+                               NAMEREG sC, MODE_FLAG_REG
+                               ;------------------------------------------------------------------------------------------
+                               ; Main Program
+                               ;------------------------------------------------------------------------------------------
+                init_keyboard: 
+                               LOAD KEY_FLAG_REG, 00                  ; set keyboard flags to zero
+                               LOAD MODE_FLAG_REG, 40                 ; set ANSI parsing flags- num lock state is on (LED off)
+                               LOAD s0, 00
+                               STORE s0, LED_flags                    ; turn off keyboard LEDs
+                               OUTPUT s0, MODE_PORT
+                               CALL reset_UART_macros
+                               ;   LOAD s5, "H"
+                               ;   CALL UART_TX
+                               ;   LOAD s5, "e"
+                               ;   CALL UART_TX
+                               ;   LOAD s5, "l"
+                               ;   CALL UART_TX
+                               ;   LOAD s5, "l"
+                               ;   CALL UART_TX
+                               ;   LOAD s5, "o";
+                               ;   CALL UART_TX
+                    echo_loop: 
+                               CALL PS2CHECK
+                               JUMP echo_loop
+                               ;
+                               ; PS2CHECK reads a byte from the PS/2 keyboard port and converts it into ASCII
+                               ; or a series of control codes. It keeps track of status bits in the KEY_FLAG_REG register (global)
+                               ;
+                     PS2CHECK: INPUT s4, PS2_STATUS_PORT              ; read PS/2 status byte
+                               TEST s4, 01                            ; check low bit (empty flag)
+                               RETURN NZ                              ; empty FIFO
+                               INPUT s4, PS2_READ_PORT                ; read PS/2 scan code byte from FIFO
+                               ; CALL print_hex
+                               ; LOAD s5, " "
+                               ; JUMP output_character
+                check_release: 
+                               TEST KEY_FLAG_REG, KEY_RELEASE         ; was the last code an F0?
+                               JUMP Z, check_prefix                   ; no? OK, keep processing
+                               ; yes? is it a shift key release?
+                left_shift_up: 
+                               COMPARE s4, KEY_LEFT_SHIFT
+                               JUMP NZ, right_shift_up
+                               TEST KEY_FLAG_REG, EXTENDED            ; we ignore EXTENDED left shift because of NUMLOCK strangeness
+                               JUMP NZ, finish_release
+                               AND KEY_FLAG_REG, LEFT_SHIFT_CLR
+                               JUMP finish_release
+               right_shift_up: 
+                               COMPARE s4, KEY_RIGHT_SHIFT
+                               JUMP NZ, right_control_up
+                               AND KEY_FLAG_REG, RIGHT_SHIFT_CLR
+                               JUMP finish_release
+             right_control_up: 
+                               TEST KEY_FLAG_REG, EXTENDED
+                               JUMP Z, right_alt_up
+                               COMPARE s4, KEY_RIGHT_CONTROL
+                               JUMP NZ, right_alt_up
+                               AND KEY_FLAG_REG, RIGHT_CONTROL_CLR
+                               JUMP finish_release
+                 right_alt_up: 
+                               TEST KEY_FLAG_REG, EXTENDED
+                               JUMP Z, left_control_up
+                               COMPARE s4, KEY_RIGHT_ALT
+                               JUMP NZ, finish_release
+                               AND KEY_FLAG_REG, RIGHT_ALT_CLR
+                               JUMP finish_release
+              left_control_up: ; we do this regardless of whether we're an extended code or not to support both left and right control
+                               COMPARE s4, KEY_LEFT_CONTROL
+                               JUMP NZ, left_alt_up
+                               AND KEY_FLAG_REG, LEFT_CONTROL_CLR
+                               JUMP finish_release
+                  left_alt_up: ; we do this regardless of whether we're an extended code or not to support both left and right alt
+                               COMPARE s4, KEY_LEFT_ALT
+                               JUMP NZ, finish_release
+                               AND KEY_FLAG_REG, LEFT_ALT_CLR
+                               JUMP finish_release
+               finish_release: 
+                               AND KEY_FLAG_REG, RELEASE_EXT_CLR      ; otherwise clear the extended and release bits and return
+                               RETURN                                 ; later we need to handle the shifting keys
+                               ; key release from previous?
+                               ;
+                               ; a key was pressed (not released)
+                               ;
+                 check_prefix: 
+                               COMPARE s4, EXTKEY_PREFIX              ; extended code prefix?
+                               JUMP NZ, check_break
+                               OR KEY_FLAG_REG, EXTENDED
+                               RETURN 
+                  check_break: 
+                               COMPARE s4, BREAK_PREFIX
+                               JUMP NZ, release_code
+                               OR MODE_FLAG_REG, MODE_BREAK
+                               RETURN 
+                 release_code: COMPARE s4, KEY_RELEASE_PREFIX         ; key release prefix?
+                               JUMP NZ, standard_code
+                               OR KEY_FLAG_REG, KEY_RELEASE
+                               RETURN 
+                standard_code: 
+              scroll_lock_hit: 
+                               COMPARE s4, KEY_SCROLLLOCK
+                               JUMP NZ, num_lock_hit
+                               LOAD s5, META_CHAR
+                               CALL print_the_char
+                               TEST KEY_FLAG_REG, EITHER_ALT
+                               JUMP NZ, scroll_lock_alt
+                               TEST KEY_FLAG_REG, EITHER_SHIFT
+                               JUMP NZ, scroll_lock_shift
+                               TEST KEY_FLAG_REG, EITHER_CONTROL
+                               JUMP NZ, scroll_lock_control
+            scroll_lock_plain: 
+                               XOR MODE_FLAG_REG, MODE_SCROLL_LOCK    ; plain scroll lock toggles the LED
+                               LOAD s5, "s"                           ; lowe case s
+                               CALL print_the_char
+                               TEST MODE_FLAG_REG, MODE_SCROLL_LOCK
+                               JUMP NZ, scroll_led_on
+                               JUMP scroll_led_off
+          scroll_lock_control: 
+                               LOAD s5, 13                            ; control-S
+                               JUMP print_the_char
+              scroll_lock_alt: 
+                               TEST KEY_FLAG_REG, EITHER_CONTROL
+                               JUMP NZ, scroll_lock_control_alt
+                               TEST KEY_FLAG_REG, EITHER_SHIFT
+                               JUMP NZ, scroll_lock_shift_alt
+                               LOAD s5, F3                            ; alt-s (lower case s with high bit set)
+                               JUMP print_the_char
+        scroll_lock_shift_alt: 
+                               LOAD s5, D3                            ; alt-shift-S (upper case S with high bit set)
+                               JUMP print_the_char
+      scroll_lock_control_alt: 
+                               TEST KEY_FLAG_REG, EITHER_SHIFT
+                               JUMP NZ, scroll_lock_control_shift_alt
+                               LOAD s5, 93                            ; alt-control-S (control-S with the high bit set)
+                               JUMP print_the_char
+scroll_lock_control_shift_alt: 
+                               LOAD s5, A4                            ; dollar sign $ with high bit set
+                               JUMP print_the_char
+            scroll_lock_shift: 
+                               TEST KEY_FLAG_REG, EITHER_CONTROL
+                               JUMP NZ, scroll_lock_control_shift
+                               LOAD s5, "S"                           ; upper case S
+                               JUMP print_the_char
+    scroll_lock_control_shift: 
+                               LOAD s5, "$"
+                               JUMP print_the_char
+                 num_lock_hit: 
+                               COMPARE s4, KEY_NUMLOCK
+                               JUMP NZ, caps_lock_hit
+                  pause_break: 
+                               TEST MODE_FLAG_REG, MODE_BREAK
+                               JUMP Z, non_break_numlock
+                               AND MODE_FLAG_REG, MODE_BREAK_CLR
+                               CALL send_csi
+                               LOAD s5, "4"
+                               CALL print_the_char
+                               LOAD s5, "0"
+                               CALL print_the_char
+                               CALL extended_modifiers
+                               JUMP send_tilde
+            non_break_numlock: 
+                               TEST KEY_FLAG_REG, EITHER_SHIFT        ; shift NUMLOCK puts us in RAW debug mode
+                               JUMP Z, control_numlock
+                shift_numlock: 
+                               XOR MODE_FLAG_REG, MODE_DEBUG
+                               RETURN 
+              control_numlock: ; control NUMLOCK toggles keypad nethack mode
+                               TEST KEY_FLAG_REG, EITHER_CONTROL
+                               JUMP Z, alt_numlock
+                               TEST KEY_FLAG_REG, EITHER_ALT
+                               JUMP NZ, control_alt_numlock
+                               XOR MODE_FLAG_REG, MODE_NETHACK
+                               RETURN 
+          control_alt_numlock: 
+                               ; control-alt numlock code here
+                               ; CALL num_led_off
+                               RETURN 
+                  alt_numlock: 
+                               TEST KEY_FLAG_REG, EITHER_ALT
+                               JUMP Z, normal_numlock
+                               LOAD s0, 00                            ; typematic maximum rate 30 cps, mimimum 250 millisecond delay
+                               OUTPUT s0, TYPEMATIC_PORT
+                               RETURN 
+               normal_numlock: 
+                               XOR MODE_FLAG_REG, MODE_NUM_LOCK
+                               ; there is some kind of bug. ******************************
+                               TEST MODE_FLAG_REG, MODE_NUM_LOCK      ; keyboard freezes up when we turn the LED on.
+                               JUMP NZ, num_led_off
+                               JUMP num_led_on
+                caps_lock_hit: 
+                               COMPARE s4, KEY_CAPSLOCK
+                               JUMP NZ, left_shift
+                               XOR MODE_FLAG_REG, MODE_CAPS_LOCK      ; caps lock status is toggled on and off
+                               TEST MODE_FLAG_REG, MODE_CAPS_LOCK
+                               JUMP NZ, caps_led_on
+                               JUMP caps_led_off
+                   left_shift: 
+                               COMPARE s4, KEY_LEFT_SHIFT
+                               JUMP NZ, right_shift
+          extended_left_shift: 
+                               TEST KEY_FLAG_REG, EXTENDED            ; we ignore EXTENDED left shift because of NUMLOCK strangeness
+                               RETURN NZ
+                               OR KEY_FLAG_REG, LEFT_SHIFT
+                               RETURN 
+                  right_shift: COMPARE s4, KEY_RIGHT_SHIFT
+                               JUMP NZ, right_control
+                               OR KEY_FLAG_REG, RIGHT_SHIFT
+                               RETURN 
+                right_control: 
+                               TEST KEY_FLAG_REG, EXTENDED
+                               JUMP Z, left_control
+                               COMPARE s4, KEY_RIGHT_CONTROL
+                               JUMP NZ, left_control
+                               OR KEY_FLAG_REG, RIGHT_CONTROL
+                               AND KEY_FLAG_REG, EXTENDED_CLR
+                               RETURN 
+                 left_control: 
+                               COMPARE s4, KEY_LEFT_CONTROL
+                               JUMP NZ, right_alt
+                               OR KEY_FLAG_REG, LEFT_CONTROL
+                               RETURN 
+                    right_alt: 
+                               TEST KEY_FLAG_REG, EXTENDED
+                               JUMP Z, left_alt
+                               COMPARE s4, KEY_RIGHT_ALT
+                               JUMP NZ, left_alt
+                               OR KEY_FLAG_REG, RIGHT_ALT
+                               AND KEY_FLAG_REG, EXTENDED_CLR
+                               RETURN 
+                     left_alt: 
+                               COMPARE s4, KEY_LEFT_ALT
+                               JUMP NZ, actual_key
+                               OR KEY_FLAG_REG, LEFT_ALT
+                               RETURN 
+                   actual_key: ; keys that actually generate one or more codes
+                               TEST KEY_FLAG_REG, EXTENDED
+                               JUMP Z, not_extended
+             ext_print_screen: 
+                               COMPARE s4, EXTKEY_PRINT_SCREEN
+                               JUMP NZ, ext_windows
+                               CALL send_csi
+                               LOAD s5, "4"
+                               CALL print_the_char
+                               LOAD s5, "1"
+                               CALL print_the_char
+                               CALL extended_modifiers
+                               JUMP send_tilde
+                  ext_windows: 
+                               COMPARE s4, EXTKEY_WINDOWS
+                               JUMP NZ, ext_menu
+                               CALL send_csi
+                               LOAD s5, "4"
+                               CALL print_the_char
+                               LOAD s5, "2"
+                               CALL print_the_char
+                               CALL extended_modifiers
+                               JUMP send_tilde
+                     ext_menu: 
+                               COMPARE s4, EXTKEY_MENU
+                               JUMP NZ, ext_sleep
+                               CALL send_csi
+                               LOAD s5, "4"
+                               CALL print_the_char
+                               LOAD s5, "3"
+                               CALL print_the_char
+                               CALL extended_modifiers
+                               JUMP send_tilde
+                    ext_sleep: 
+                               COMPARE s4, MEDIA_SLEEP
+                               JUMP NZ, ext_enter
+                               CALL send_csi
+                               LOAD s5, "4"
+                               CALL print_the_char
+                               LOAD s5, "4"
+                               CALL print_the_char
+                               CALL extended_modifiers
+                               JUMP send_tilde
+                    ext_enter: 
+                               COMPARE s4, EXTKEY_KEYPAD_ENTER        ;
+                               JUMP NZ, ext_slash
+                               LOAD s5, CR
+                               JUMP check_special
+                    ext_slash: 
+                               COMPARE s4, EXTKEY_KEYPAD_SLASH
+                               JUMP NZ, ext_delete
+                               LOAD s5, "/"
+                               JUMP check_special
+                   ext_delete: 
+                               COMPARE s4, EXTKEY_DELETE
+                               JUMP NZ, ext_up
+                ext_do_delete: 
+                               CALL send_csi
+                               LOAD s5, "3"
+                               CALL print_the_char
+                               CALL extended_modifiers
+                               JUMP send_tilde
+                       ext_up: 
+                               COMPARE s4, EXTKEY_UP                  ;
+                               JUMP NZ, ext_down
+                    ext_do_up: 
+                               CALL send_csi
+                               CALL extended_modifiers_single
+                               LOAD s5, "A"
+                               JUMP print_the_char
+                     ext_down: 
+                               COMPARE s4, EXTKEY_DOWN
+                               JUMP NZ, ext_right
+                  ext_do_down: 
+                               CALL send_csi
+                               CALL extended_modifiers_single
+                               LOAD s5, "B"
+                               JUMP print_the_char
+                    ext_right: 
+                               COMPARE s4, EXTKEY_RIGHT
+                               JUMP NZ, ext_left
+                 ext_do_right: 
+                               CALL send_csi
+                               CALL extended_modifiers_single
+                               LOAD s5, "C"
+                               JUMP print_the_char
+                     ext_left: 
+                               COMPARE s4, EXTKEY_LEFT
+                               JUMP NZ, ext_home
+                  ext_do_left: 
+                               CALL send_csi
+                               CALL extended_modifiers_single
+                               LOAD s5, "D"
+                               JUMP print_the_char
+                  ext_do_dead: ; the dead '5' key when we're in num lock mode
+                               CALL send_csi
+                               CALL extended_modifiers_single
+                               LOAD s5, "E"                           ; this is what Ubuntu xterm sends.
+                               JUMP print_the_char
+                               ;
+                               ; CSI-tilde is for extended keys.
+                               ; a second parameter can be present as a modifier:
+                               ;
+                               ; 2 shift
+                               ; 3 alt
+                               ; 4 shift+alt
+                               ; 5 control
+                               ; 6 shift+control
+                               ; 7 alt+control
+                               ; 8 shift+alt+control
+                               ;
+                               ; Another way to do it:
+                               ; (shift)+(alt*2)+(control*4) + 1
+                               ;
+           extended_modifiers: ; add key modifiers if any are set
+                               CALL test_modifiers
+                               ADD s0, 01
+                               COMPARE s0, 01
+                               RETURN Z
+                               ADD s0, 30                             ; make it a printable ASCII digit
+                               STORE s0, scratchW
+                               LOAD s5, ";"
+                               CALL print_the_char
+                               FETCH s5, scratchW
+                               JUMP print_the_char
+    extended_modifiers_single: ; single iteration plus modifiers
+                               CALL test_modifiers
+                               ADD s0, 01
+                               COMPARE s0, 01
+                               RETURN Z
+                               ADD s0, 30                             ; make it a printable ASCII digit
+                               STORE s0, scratchW
+                               LOAD s5, "1"                           ; single iteration
+                               CALL print_the_char
+                               LOAD s5, ";"
+                               CALL print_the_char
+                               FETCH s5, scratchW
+                               JUMP print_the_char
+               test_modifiers: 
+                               LOAD s0, 00
+                   test_shift: 
+                               TEST KEY_FLAG_REG, EITHER_SHIFT
+                               JUMP Z, test_alt
+                               ADD s0, 01
+                     test_alt: 
+                               TEST KEY_FLAG_REG, EITHER_ALT
+                               JUMP Z, test_control
+                               ADD s0, 02
+                 test_control: 
+                               TEST KEY_FLAG_REG, EITHER_CONTROL
+                               JUMP Z, test_end                       ; not a RETURN Z because we plan to support META later
+                               ADD s0, 04
+                     test_end: 
+                               RETURN 
+                               ;
+                               ; more extended keys
+                               ;
+                               ;
+                     ext_home: 
+                               COMPARE s4, EXTKEY_HOME
+                               JUMP NZ, ext_insert
+                  ext_do_home: 
+                               CALL send_csi
+                               LOAD s5, "1"
+                               CALL print_the_char
+                               CALL extended_modifiers
+                               JUMP send_tilde
+                   ext_insert: 
+                               COMPARE s4, EXTKEY_INSERT
+                               JUMP NZ, ext_end
+                ext_do_insert: 
+                               CALL send_csi
+                               LOAD s5, "2"                           ; putty/xterm
+                               CALL print_the_char
+                               CALL extended_modifiers
+                               JUMP send_tilde
+                      ext_end: ; from terminfo for xterm
+                               COMPARE s4, EXTKEY_END
+                               JUMP NZ, ext_pgup
+                   ext_do_end: 
+                               CALL send_csi
+                               LOAD s5, "4"
+                               CALL print_the_char
+                               CALL extended_modifiers
+                               JUMP send_tilde
+                     ext_pgup: ; from terminfo for xterm
+                               COMPARE s4, EXTKEY_PGUP
+                               JUMP NZ, ext_pgdn
+                  ext_do_pgup: 
+                               CALL send_csi
+                               LOAD s5, "5"
+                               CALL print_the_char
+                               CALL extended_modifiers
+                               JUMP send_tilde
+                     ext_pgdn: ; from terminfo for xterm
+                               COMPARE s4, EXTKEY_PGDN
+                               JUMP NZ, ext_other
+                  ext_do_pgdn: 
+                               CALL send_csi
+                               LOAD s5, "6"
+                               CALL print_the_char
+                               CALL extended_modifiers
+                               JUMP send_tilde
+                               ; JUMP check_special
+                    ext_other: 
+                extended_code: 
+                               AND KEY_FLAG_REG, EXTENDED_CLR         ; clear the extended flag
+                               ;AND MODE_FLAG_REG, MODE_BREAK_CLR ; clear the break flag
+                               RETURN 
+                               ;
+                               ; a key was pressed and it is not an extended code
+                               ;
+                 not_extended: 
+                               TEST MODE_FLAG_REG, MODE_NUM_LOCK
+                               JUMP Z, special_non_extended
+                   numlock_on: 
+                               ;
+                               ; nethack mode. keypad keys are interpreted as:
+                               ;
+                               ; y k u
+                               ; h . l
+                               ; b j n
+                               TEST KEY_FLAG_REG, EITHER_SHIFT        ; shift key negates num-lock mode
+                               JUMP NZ, special_non_extended
+                               TEST MODE_FLAG_REG, MODE_NETHACK
+                               JUMP Z, keypad_navigation
+                               COMPARE s4, KEYPAD_INSERT
+                               JUMP Z, hack_0
+                               COMPARE s4, KEYPAD_DELETE
+                               JUMP Z, hack_dot
+                               COMPARE s4, KEYPAD_HOME
+                               JUMP Z, hack_7
+                               COMPARE s4, KEYPAD_END
+                               JUMP Z, hack_1
+                               COMPARE s4, KEYPAD_PGUP
+                               JUMP Z, hack_9
+                               COMPARE s4, KEYPAD_PGDN
+                               JUMP Z, hack_3
+                               COMPARE s4, KEYPAD_UP
+                               JUMP Z, hack_8
+                               COMPARE s4, KEYPAD_DOWN
+                               JUMP Z, hack_2
+                               COMPARE s4, KEYPAD_LEFT
+                               JUMP Z, hack_4
+                               COMPARE s4, KEYPAD_RIGHT
+                               JUMP Z, hack_6
+                               COMPARE s4, KEYPAD_DEAD
+                               JUMP Z, hack_5
+                               JUMP special_non_extended
+                     hack_dot: LOAD s5, "."
+                               JUMP check_special
+                       hack_0: LOAD s5, "0"
+                               JUMP check_special
+                       hack_1: LOAD s5, "b"
+                               JUMP check_special
+                       hack_2: LOAD s5, "j"
+                               JUMP check_special
+                       hack_3: LOAD s5, "n"
+                               JUMP check_special
+                       hack_4: LOAD s5, "h"
+                               JUMP check_special
+                       hack_5: LOAD s5, "."
+                               JUMP check_special
+                       hack_6: LOAD s5, "l"
+                               JUMP check_special
+                       hack_7: LOAD s5, "y"
+                               JUMP check_special
+                       hack_8: LOAD s5, "k"
+                               JUMP check_special
+                       hack_9: LOAD s5, "u"
+                               JUMP check_special
+            keypad_navigation: 
+                               COMPARE s4, KEYPAD_HOME
+                               JUMP Z, ext_do_home
+                               COMPARE s4, KEYPAD_END
+                               JUMP Z, ext_do_end
+                               COMPARE s4, KEYPAD_INSERT
+                               JUMP Z, ext_do_insert
+                               COMPARE s4, KEYPAD_DELETE
+                               JUMP Z, ext_do_delete
+                               COMPARE s4, KEYPAD_PGUP
+                               JUMP Z, ext_do_pgdn
+                               COMPARE s4, KEYPAD_PGDN
+                               JUMP Z, ext_do_pgdn
+                               COMPARE s4, KEYPAD_UP
+                               JUMP Z, ext_do_up
+                               COMPARE s4, KEYPAD_DOWN
+                               JUMP Z, ext_do_down
+                               COMPARE s4, KEYPAD_LEFT
+                               JUMP Z, ext_do_left
+                               COMPARE s4, KEYPAD_RIGHT
+                               JUMP Z, ext_do_right
+                               COMPARE s4, KEYPAD_DEAD
+                               JUMP Z, ext_do_dead
+         special_non_extended: 
+                     keypad_0: 
+                               COMPARE s4, KEYPAD_INSERT
+                               JUMP NZ, keypad_1
+                               LOAD s5, "0"
+                               JUMP print_the_char
+                     keypad_1: 
+                               COMPARE s4, KEYPAD_END
+                               JUMP NZ, keypad_2
+                               LOAD s5, "1"
+                               JUMP print_the_char
+                     keypad_2: 
+                               COMPARE s4, KEYPAD_DOWN
+                               JUMP NZ, keypad_3
+                               LOAD s5, "2"
+                               JUMP print_the_char
+                     keypad_3: 
+                               COMPARE s4, KEYPAD_PGDN
+                               JUMP NZ, keypad_4
+                               LOAD s5, "3"
+                               JUMP print_the_char
+                     keypad_4: 
+                               COMPARE s4, KEYPAD_LEFT
+                               JUMP NZ, keypad_5
+                               LOAD s5, "4"
+                               JUMP print_the_char
+                     keypad_5: 
+                               COMPARE s4, KEYPAD_DEAD
+                               JUMP NZ, keypad_6
+                               LOAD s5, "5"
+                               JUMP print_the_char
+                     keypad_6: 
+                               COMPARE s4, KEYPAD_RIGHT
+                               JUMP NZ, keypad_7
+                               LOAD s5, "6"
+                               JUMP print_the_char
+                     keypad_7: 
+                               COMPARE s4, KEYPAD_HOME
+                               JUMP NZ, keypad_8
+                               LOAD s5, "7"
+                               JUMP print_the_char
+                     keypad_8: 
+                               COMPARE s4, KEYPAD_UP
+                               JUMP NZ, keypad_9
+                               LOAD s5, "8"
+                               JUMP print_the_char
+                     keypad_9: 
+                               COMPARE s4, KEYPAD_PGUP
+                               JUMP NZ, keypad_period
+                               LOAD s5, "9"
+                               JUMP print_the_char
+                keypad_period: 
+                               COMPARE s4, KEYPAD_DELETE
+                               JUMP NZ, special_non_keypad
+                               LOAD s5, "."
+                               JUMP print_the_char
+           special_non_keypad: 
+                   F1_key_hit: 
+                               COMPARE s4, KEY_F1
+                               JUMP NZ, F2_key_hit
+                               TEST KEY_FLAG_REG, ANY_MODIFIER
+                               JUMP NZ, F1_modified
+                               LOAD s5, 1B                            ; ESC
+                               CALL print_the_char
+                               LOAD s5, "O"
+                               CALL print_the_char
+                               LOAD s5, "P"
+                               JUMP print_the_char
+                  F1_modified: 
+                               CALL send_csi
+                               LOAD s5, "1"
+                               CALL print_the_char
+                               CALL extended_modifiers                ; these are wrong, wrong ,wrong- should be CSI O (modifiers) P
+                               LOAD s5, "P"
+                               JUMP print_the_char
+                   F2_key_hit: 
+                               COMPARE s4, KEY_F2
+                               JUMP NZ, F3_key_hit
+                               TEST KEY_FLAG_REG, ANY_MODIFIER
+                               JUMP NZ, F2_modified
+                               LOAD s5, 1B                            ; ESC
+                               CALL print_the_char
+                               LOAD s5, "O"
+                               CALL print_the_char
+                               LOAD s5, "Q"
+                               JUMP print_the_char
+                  F2_modified: 
+                               CALL send_csi
+                               LOAD s5, "1"
+                               CALL print_the_char
+                               CALL extended_modifiers                ; these are wrong, wrong ,wrong- should be CSI O (modifiers) P
+                               LOAD s5, "Q"
+                               JUMP print_the_char
+                   F3_key_hit: 
+                               COMPARE s4, KEY_F3
+                               JUMP NZ, F4_key_hit
+                               TEST KEY_FLAG_REG, ANY_MODIFIER
+                               JUMP NZ, F3_modified
+                               LOAD s5, 1B                            ; ESC
+                               CALL print_the_char
+                               LOAD s5, "O"
+                               CALL print_the_char
+                               LOAD s5, "R"
+                               JUMP print_the_char
+                  F3_modified: 
+                               CALL send_csi
+                               LOAD s5, "1"
+                               CALL print_the_char
+                               CALL extended_modifiers                ; these are wrong, wrong ,wrong- should be CSI O (modifiers) P
+                               LOAD s5, "R"
+                               JUMP print_the_char
+                   F4_key_hit: 
+                               COMPARE s4, KEY_F4
+                               JUMP NZ, F5_key_hit
+                               TEST KEY_FLAG_REG, ANY_MODIFIER
+                               JUMP NZ, F4_modified
+                               LOAD s5, 1B                            ; ESC
+                               CALL print_the_char
+                               LOAD s5, "O"
+                               CALL print_the_char
+                               LOAD s5, "S"
+                               JUMP print_the_char
+                  F4_modified: 
+                               CALL send_csi
+                               LOAD s5, "1"
+                               CALL print_the_char
+                               CALL extended_modifiers                ; these are wrong, wrong ,wrong- should be CSI O (modifiers) P
+                               LOAD s5, "S"
+                               JUMP print_the_char
+                   F5_key_hit: 
+                               COMPARE s4, KEY_F5
+                               JUMP NZ, F6_key_hit
+                               CALL send_csi
+                               LOAD s5, "1"
+                               CALL print_the_char
+                               LOAD s5, "5"
+                               CALL print_the_char
+                               CALL extended_modifiers
+                               JUMP send_tilde
+                   F6_key_hit: 
+                               COMPARE s4, KEY_F6
+                               JUMP NZ, F7_key_hit
+                               CALL send_csi
+                               LOAD s5, "1"
+                               CALL print_the_char
+                               LOAD s5, "7"
+                               CALL print_the_char
+                               CALL extended_modifiers
+                               JUMP send_tilde
+                   F7_key_hit: 
+                               COMPARE s4, KEY_F7
+                               JUMP NZ, F8_key_hit
+                               CALL send_csi
+                               LOAD s5, "1"
+                               CALL print_the_char
+                               LOAD s5, "8"
+                               CALL print_the_char
+                               CALL extended_modifiers
+                               JUMP send_tilde
+                   F8_key_hit: 
+                               COMPARE s4, KEY_F8
+                               JUMP NZ, F9_key_hit
+                               CALL send_csi
+                               LOAD s5, "1"
+                               CALL print_the_char
+                               LOAD s5, "9"
+                               CALL print_the_char
+                               CALL extended_modifiers
+                               JUMP send_tilde
+                   F9_key_hit: 
+                               COMPARE s4, KEY_F9
+                               JUMP NZ, F10_key_hit
+                               CALL send_csi
+                               LOAD s5, "2"
+                               CALL print_the_char
+                               LOAD s5, "0"
+                               CALL print_the_char
+                               CALL extended_modifiers
+                               JUMP send_tilde
+                  F10_key_hit: 
+                               COMPARE s4, KEY_F10
+                               JUMP NZ, F11_key_hit
+                               CALL send_csi
+                               LOAD s5, "2"
+                               CALL print_the_char
+                               LOAD s5, "1"
+                               CALL print_the_char
+                               CALL extended_modifiers
+                               JUMP send_tilde
+                  F11_key_hit: 
+                               COMPARE s4, KEY_F11
+                               JUMP NZ, F12_key_hit
+                               CALL send_csi
+                               LOAD s5, "2"
+                               CALL print_the_char
+                               LOAD s5, "3"
+                               CALL print_the_char
+                               CALL extended_modifiers
+                               JUMP send_tilde
+                  F12_key_hit: 
+                               COMPARE s4, KEY_F12
+                               JUMP NZ, not_special
+                               CALL send_csi
+                               LOAD s5, "2"
+                               CALL print_the_char
+                               LOAD s5, "4"
+                               CALL print_the_char
+                               CALL extended_modifiers
+                               JUMP send_tilde
+                  not_special: 
+                               COMPARE s4, LAST_SCAN_CODE             ; make sure we're in the valid range before jumping
+                               RETURN NC
+                               LOAD TABLE_LOW, SCAN_CODES'upper
+                               LOAD TABLE_HIGH, SCAN_CODES'lower
+                               ADD TABLE_HIGH, s4                     ; index offset
+                               ADDCY TABLE_LOW, 00
+                               CALL@ (TABLE_LOW, TABLE_HIGH)          ; lookup our character code
+                               ;
+                               ; s5 now contains either a 0x00 or an ASCII character from our lookup table
+                               ; check for shift-[symbol] combinations
+               shifted_symbol: 
+                               TEST KEY_FLAG_REG, EITHER_SHIFT
+                               JUMP Z, not_shifted
+                         key0: 
+                               COMPARE s5, 09
+                               JUMP NZ, key1
+                               CALL send_csi
+                               LOAD s5, "Z"
+                               JUMP print_the_char
+                         key1: COMPARE s5, "1"
+                               JUMP NZ, key2
+                               LOAD s5, "!"
+                               JUMP printable_char
+                         key2: COMPARE s5, "2"
+                               JUMP NZ, key3
+                               LOAD s5, "@"
+                               JUMP printable_char
+                         key3: COMPARE s5, "3"
+                               JUMP NZ, key4
+                               LOAD s5, "#"
+                               JUMP printable_char
+                         key4: COMPARE s5, "4"
+                               JUMP NZ, key5
+                               LOAD s5, "$"
+                               JUMP printable_char
+                         key5: COMPARE s5, "5"
+                               JUMP NZ, key6
+                               LOAD s5, "%"
+                               JUMP printable_char
+                         key6: COMPARE s5, "6"
+                               JUMP NZ, key7
+                               LOAD s5, "^"
+                               TEST KEY_FLAG_REG, EITHER_CONTROL
+                               JUMP Z, printable_char
+                               LOAD s5, 1E                            ; ctrl-caret is code 0x1E, ECSCAPE+3
+                               JUMP printable_char
+                         key7: COMPARE s5, "7"
+                               JUMP NZ, key8
+                               LOAD s5, "&"
+                               JUMP printable_char
+                         key8: COMPARE s5, "8"
+                               JUMP NZ, key9
+                               LOAD s5, "*"
+                               JUMP printable_char
+                         key9: COMPARE s5, "9"
+                               JUMP NZ, key10
+                               LOAD s5, "("
+                               JUMP printable_char
+                        key10: COMPARE s5, "0"
+                               JUMP NZ, key11
+                               LOAD s5, ")"
+                               JUMP printable_char
+                        key11: COMPARE s5, 60                         ; accent grave "'"
+                               JUMP NZ, key12
+                               LOAD s5, "~"
+                               JUMP printable_char
+                        key12: COMPARE s5, "-"
+                               JUMP NZ, key13
+                               LOAD s5, "_"
+                               TEST KEY_FLAG_REG, EITHER_CONTROL
+                               JUMP Z, printable_char
+                               LOAD s5, 1F                            ; ctrl-underscore is 0x1F, ESCAPE+4
+                               JUMP printable_char
+                        key13: COMPARE s5, "="
+                               JUMP NZ, key14
+                               LOAD s5, "+"
+                               JUMP printable_char
+                        key14: COMPARE s5, ";"
+                               JUMP NZ, key15
+                               LOAD s5, ":"
+                               JUMP printable_char
+                        key15: COMPARE s5, 27                         ; single quote "'"
+                               JUMP NZ, key16
+                               LOAD s5, 22                            ; double quotes
+                               JUMP printable_char
+                        key16: COMPARE s5, "["
+                               JUMP NZ, key17
+                               LOAD s5, "{"
+                               JUMP printable_char
+                        key17: COMPARE s5, "]"
+                               JUMP NZ, key18
+                               LOAD s5, "}"
+                               JUMP printable_char
+                        key18: COMPARE s5, "\"
+                               JUMP NZ, key19
+                               LOAD s5, "|"
+                               JUMP printable_char
+                        key19: COMPARE s5, ","
+                               JUMP NZ, key20
+                               LOAD s5, "<"
+                               JUMP printable_char
+                        key20: COMPARE s5, "."
+                               JUMP NZ, key21
+                               LOAD s5, ">"
+                               JUMP printable_char
+                        key21: COMPARE s5, "/"
+                               JUMP NZ, check_special
+                               LOAD s5, "?"
+                               TEST KEY_FLAG_REG, EITHER_CONTROL
+                               JUMP Z, printable_char
+                               LOAD s5, 7F                            ; delete key (rubout, 0x7F) is also CTRL-question_mark
+                               JUMP printable_char
+                  not_shifted: 
+               control_symbol: 
+                               TEST KEY_FLAG_REG, EITHER_CONTROL
+                               JUMP Z, check_special
+                               ;
+                               ; at this point we know the control key is pressed and the shift keys are not pressed,
+                               ; so we handle a few special cases that are not alpha (A-Z) control codes
+                               ;
+                        key00: COMPARE s5, "["
+                               JUMP NZ, key01
+                               LOAD s5, 1B                            ; ESCAPE is also control-open_bracket
+                               JUMP printable_char
+                        key01: COMPARE s5, "\"
+                               JUMP NZ, key02
+                               LOAD s5, 1C                            ; ESCAPE +1, rarely used but we support it, control-backslash
+                               JUMP printable_char
+                        key02: COMPARE s5, "]"
+                               JUMP NZ, key03
+                               LOAD s5, 1D                            ; ESCAPE +2, rarely used but we support it, control-close_bracket
+                               JUMP printable_char
+                        key03: COMPARE s5, "2"
+                               JUMP NZ, key04
+                               LOAD s5, 00                            ; NULL, rarely used but we support it for output to the host control-at_sign
+                               JUMP output_character                  ; we bypass the local echo. note that an undefined keyboard scan code (non-extended)
+                               ; will also send a NULL to the host.
+                        key04: COMPARE s5, 08
+                               JUMP NZ, check_special
+                               LOAD s5, 7F                            ; we implement control-backspace as delete (rubout) char 127
+                               JUMP printable_char
+                check_special: 
+                               ; are we a letter of the alphabet?
+                               COMPARE s5, 7B                         ; lower case 'z' plus one
+                               JUMP NC, printable_char                ; we're above z
+                               COMPARE s5, 60                         ; lower case 'a' minus one
+                               JUMP C, printable_char
+                               JUMP Z, printable_char                 ; we're below or equal to 'a' minus one
+                               TEST KEY_FLAG_REG, EITHER_CONTROL
+                               JUMP Z, check_shift
+                               SUB s5, 60                             ; we're a control character, so we start at 0
+                               JUMP printable_char
+                  check_shift: TEST MODE_FLAG_REG, MODE_CAPS_LOCK
+                               JUMP Z, no_caps_lock
+                               TEST KEY_FLAG_REG, EITHER_SHIFT
+                               JUMP NZ, printable_char                ; we do the shift thing but we're NZ instead of Z
+                               SUB s5, 20
+                               JUMP printable_char
+                 no_caps_lock: TEST KEY_FLAG_REG, EITHER_SHIFT
+                               JUMP Z, printable_char
+                               SUB s5, 20                             ; we're upper case so we start at 40
+                               ;
+                               ; at this point we've processed everything and have a character in s5.
+                               ; here is where we actually DO something with the character code. ;
+                               ;
+               printable_char: 
+                               TEST KEY_FLAG_REG, EITHER_ALT
+                               JUMP Z, print_the_char                 ; if alt key is pressed then we set the high bit
+                               OR s5, 80
+                               COMPARE s5, META_CHAR
+                               CALL Z, print_the_char                 ; if it's an unaccompanied META_CHAR (0x9E) we print it twice because it's an escape character
+               print_the_char: 
+             output_character: 
+                               TEST MODE_FLAG_REG, MODE_DEBUG
+                               JUMP Z, send_uart
+                               COMPARE s5, 20
+                               JUMP NC, send_uart
+                               LOAD s4, s5
+                               LOAD s5, "^"
+                               CALL UART_TX
+                               LOAD s5, s4
+                               ADD s5, 40
+                    send_uart: 
+                               JUMP UART_TX
+                  caps_led_on: 
+                               FETCH s0, LED_flags
+                               OR s0, CAPS_LOCK_LED
+                               STORE s0, LED_flags
+                               OUTPUT s0, MODE_PORT
+                               RETURN 
+                 caps_led_off: 
+                               FETCH s0, LED_flags
+                               AND s0, CAPS_LOCK_LED_CLR
+                               STORE s0, LED_flags
+                               OUTPUT s0, MODE_PORT
+                               RETURN 
+                   num_led_on: 
+                               FETCH s0, LED_flags
+                               OR s0, NUM_LOCK_LED
+                               OR s0, DUMMY_LED
+                               STORE s0, LED_flags
+                               OUTPUT s0, MODE_PORT
+                               RETURN 
+                  num_led_off: 
+                               FETCH s0, LED_flags
+                               AND s0, NUM_LOCK_LED_CLR
+                               STORE s0, LED_flags
+                               OUTPUT s0, MODE_PORT
+                               RETURN 
+                 num_led_on_2: 
+                               FETCH s0, LED_flags
+                               OR s0, SCROLL_LOCK_LED
+                               STORE s0, LED_flags
+                               OUTPUT s0, MODE_PORT
+                               RETURN 
+                num_led_off_2: 
+                               FETCH s0, LED_flags
+                               AND s0, SCROLL_LOCK_LED_CLR
+                               STORE s0, LED_flags
+                               OUTPUT s0, MODE_PORT
+                               RETURN 
+                scroll_led_on: 
+                               FETCH s0, LED_flags
+                               OR s0, SCROLL_LOCK_LED
+                               STORE s0, LED_flags
+                               OUTPUT s0, MODE_PORT
+                               RETURN 
+               scroll_led_off: 
+                               FETCH s0, LED_flags
+                               AND s0, SCROLL_LOCK_LED_CLR
+                               STORE s0, LED_flags
+                               OUTPUT s0, MODE_PORT
+                               RETURN 
+                   send_tilde: 
+                               LOAD s5, "~"
+                               JUMP print_the_char
+                     send_csi: ; send the ESCAPE-[ sequence to the appropriate place
+                               LOAD s5, ESC
+                               CALL print_the_char
+                               LOAD s5, "["
+                               JUMP print_the_char
+                    print_hex: 
+                               LOAD s5, s4                            ;isolate upper nibble
+                               SR0 s5
+                               SR0 s5
+                               SR0 s5
+                               SR0 s5
+                               CALL hex_to_text                       ; convert to ASCII
+                               CALL output_character
+                               LOAD s5, s4                            ;isolate lower nibble
+                               AND s5, 0F
+                               CALL hex_to_text                       ; convert to ASCII
+                               CALL output_character
+                               RETURN 
+                               ; Convert value 00 to 0F provided in 's5' into ASCII character in 's5'
+                               ; Register used s5
+                  hex_to_text: SUB s5, 0A                             ;test if value is in range 0 to 9
+                               JUMP C, number_to_char
+                               ADD s5, 07                             ;ASCII char A to F in range 41 to 46
+               number_to_char: ADD s5, 3A                             ;ASCII char 0 to 9 in range 30 to 40
+                               RETURN 
+                               ;
+                               ; the scan code table lists the natural unshifted ASCII value associated with each code from
+                               ; the SCAN CODE 2 table.
+                               ;
+                               ; Non-printable keys are assigned a value of 0x00 and are handled separately from within PS2CHECK.
+                               ;
+                               ; The numeric keypad keys are intercepted before this table when the NUMLOCK flag is set.
+                               ;
+                               ; the exceptions are:
+                               ; ESC which is assigned the non-printable value of 0x1B.
+                               ; RETURN which is assigned the non-printable value of 0x0D (CR, ^M)
+                               ; TAB which is assigned the non-printable value of 0x09 (^I)
+                               ; BACKSPACE which is assigned the non-printable value of 0x08 (^H)
+                               ;
+                               ; this table does not encode any of the extended keys (scan codes with prefix E0 or E1). Those
+                               ; are also handled separately by PS2CHECK.
+                               ;
+                               ; we wanted to use the PicoBlaze-6 TABLE directive to simplify this code but it's brain dead
+                               ; and will not accept a mixture of hex and character values so we did it the long way.
+                               ;
+                   SCAN_CODES: LOAD&RETURN s5, 00                     ; 00
+                               LOAD&RETURN s5, 00                     ; 01 F9 (99)
+                               LOAD&RETURN s5, 00                     ; 02
+                               LOAD&RETURN s5, 00                     ; 03 F5
+                               LOAD&RETURN s5, 00                     ; 04 F3
+                               LOAD&RETURN s5, 00                     ; 05 F1
+                               LOAD&RETURN s5, 00                     ; 06 F2
+                               LOAD&RETURN s5, 00                     ; 07 F12
+                               LOAD&RETURN s5, 00                     ;
+                               LOAD&RETURN s5, 00                     ; 09 F10 (9A)
+                               LOAD&RETURN s5, 00                     ; 0A F8 (98)
+                               LOAD&RETURN s5, 00                     ; 0B F6 (96)
+                               LOAD&RETURN s5, 00                     ; 0C F4
+                               LOAD&RETURN s5, 09                     ; 0D Tab
+                               LOAD&RETURN s5, 60                     ; 0E ' not sure about this one. ''' accent grave
+                               LOAD&RETURN s5, 00                     ; 0F
+                               LOAD&RETURN s5, 00                     ; 10
+                               LOAD&RETURN s5, 00                     ; 11 left alt
+                               LOAD&RETURN s5, 00                     ; 12 left shift
+                               LOAD&RETURN s5, 00                     ; 13
+                               LOAD&RETURN s5, 00                     ; 14 left CTRL
+                               LOAD&RETURN s5, "q"                    ; 15 q
+                               LOAD&RETURN s5, "1"                    ; 16 1 (one)
+                               LOAD&RETURN s5, 00                     ; 17
+                               LOAD&RETURN s5, 00                     ; 18
+                               LOAD&RETURN s5, 00                     ; 19
+                               LOAD&RETURN s5, "z"                    ; 1A z
+                               LOAD&RETURN s5, "s"                    ; 1B s
+                               LOAD&RETURN s5, "a"                    ; 1C a
+                               LOAD&RETURN s5, "w"                    ; 1D w
+                               LOAD&RETURN s5, "2"                    ; 1E 2
+                               LOAD&RETURN s5, 00                     ; 1F
+                               LOAD&RETURN s5, 00                     ; 20
+                               LOAD&RETURN s5, "c"                    ; 21 c
+                               LOAD&RETURN s5, "x"                    ; 22 x
+                               LOAD&RETURN s5, "d"                    ; 23 d
+                               LOAD&RETURN s5, "e"                    ; 24 e
+                               LOAD&RETURN s5, "4"                    ; 25 4
+                               LOAD&RETURN s5, "3"                    ; 26 3
+                               LOAD&RETURN s5, 00                     ; 27
+                               LOAD&RETURN s5, 00                     ; 28
+                               LOAD&RETURN s5, " "                    ; 29 space
+                               LOAD&RETURN s5, "v"                    ; 2A v
+                               LOAD&RETURN s5, "f"                    ; 2B f
+                               LOAD&RETURN s5, "t"                    ; 2C t
+                               LOAD&RETURN s5, "r"                    ; 2D r
+                               LOAD&RETURN s5, "5"                    ; 2E 5
+                               LOAD&RETURN s5, 00                     ; 2F
+                               LOAD&RETURN s5, 00                     ; 30
+                               LOAD&RETURN s5, "n"                    ; 31 n
+                               LOAD&RETURN s5, "b"                    ; 32 b
+                               LOAD&RETURN s5, "h"                    ; 33 h
+                               LOAD&RETURN s5, "g"                    ; 34 g
+                               LOAD&RETURN s5, "y"                    ; 35 y
+                               LOAD&RETURN s5, "6"                    ; 36 6
+                               LOAD&RETURN s5, 00                     ; 37
+                               LOAD&RETURN s5, 00                     ; 38
+                               LOAD&RETURN s5, 00                     ; 39 (grave?)
+                               LOAD&RETURN s5, "m"                    ; 3A m
+                               LOAD&RETURN s5, "j"                    ; 3B j
+                               LOAD&RETURN s5, "u"                    ; 3C u
+                               LOAD&RETURN s5, "7"                    ; 3D 7
+                               LOAD&RETURN s5, "8"                    ; 3E 8
+                               LOAD&RETURN s5, 00                     ; 3F
+                               LOAD&RETURN s5, 00                     ; 40
+                               LOAD&RETURN s5, ","                    ; 41 ,
+                               LOAD&RETURN s5, "k"                    ; 42 k
+                               LOAD&RETURN s5, "i"                    ; 43 i
+                               LOAD&RETURN s5, "o"                    ; 44 o
+                               LOAD&RETURN s5, "0"                    ; 45 0 (zero)
+                               LOAD&RETURN s5, "9"                    ; 46 9
+                               LOAD&RETURN s5, 00                     ; 47
+                               LOAD&RETURN s5, 00                     ; 48
+                               LOAD&RETURN s5, "."                    ; 49 .
+                               LOAD&RETURN s5, "/"                    ; 4A /
+                               LOAD&RETURN s5, "l"                    ; 4B l (L)
+                               LOAD&RETURN s5, ";"                    ; 4C ;
+                               LOAD&RETURN s5, "p"                    ; 4D p
+                               LOAD&RETURN s5, "-"                    ; 4E -
+                               LOAD&RETURN s5, 00                     ; 4F
+                               LOAD&RETURN s5, 00                     ; 50
+                               LOAD&RETURN s5, 00                     ; 51
+                               LOAD&RETURN s5, 27                     ; 52 single quote "'", ascii 0x27
+                               LOAD&RETURN s5, 00                     ; 53
+                               LOAD&RETURN s5, "["                    ; 54 [
+                               LOAD&RETURN s5, "="                    ; 55 =
+                               LOAD&RETURN s5, 00                     ; 56
+                               LOAD&RETURN s5, 00                     ; 57
+                               LOAD&RETURN s5, 00                     ; 58 caps lock
+                               LOAD&RETURN s5, 00                     ; 59 right shift
+                               LOAD&RETURN s5, CR                     ; 5A enter
+                               LOAD&RETURN s5, "]"                    ; 5B ]
+                               LOAD&RETURN s5, 00                     ; 5C
+                               LOAD&RETURN s5, "\"                    ; 5D \
+                               LOAD&RETURN s5, 00                     ; 5E
+                               LOAD&RETURN s5, 00                     ; 5F
+                               LOAD&RETURN s5, 00                     ; 60
+                               LOAD&RETURN s5, 00                     ; 61
+                               LOAD&RETURN s5, 00                     ; 62
+                               LOAD&RETURN s5, 00                     ; 63
+                               LOAD&RETURN s5, 00                     ; 64
+                               LOAD&RETURN s5, 00                     ; 65
+                               LOAD&RETURN s5, 08                     ; 66 BACKSPACE
+                               LOAD&RETURN s5, 00                     ; 67
+                               LOAD&RETURN s5, 00                     ; 68
+                               LOAD&RETURN s5, "1"                    ; 69 1(KEYPAD END)
+                               LOAD&RETURN s5, 00                     ; 6A
+                               LOAD&RETURN s5, "4"                    ; 6B 4(KEYPAD LEFT)
+                               LOAD&RETURN s5, "7"                    ; 6C 7(KEYPAD HOME)
+                               LOAD&RETURN s5, 00                     ; 6D
+                               LOAD&RETURN s5, 00                     ; 6E
+                               LOAD&RETURN s5, 00                     ; 6F
+                               LOAD&RETURN s5, "0"                    ; 70 0(KEYPAD INS)
+                               LOAD&RETURN s5, "."                    ; 71 .(KEYPAD DEL)
+                               LOAD&RETURN s5, "2"                    ; 72 2(KEYPAD DOWN)
+                               LOAD&RETURN s5, "5"                    ; 73 5(KEYPAD)
+                               LOAD&RETURN s5, "6"                    ; 74 6(KEYPAD RIGHT)
+                               LOAD&RETURN s5, "8"                    ; 75 8(KEYPAD UP)
+                               LOAD&RETURN s5, 1B                     ; 76 ESC
+                               LOAD&RETURN s5, 00                     ; 77 NUM LOCK
+                               LOAD&RETURN s5, 00                     ; 78 F11 (9B)
+                               LOAD&RETURN s5, "+"                    ; 79 +(KEYPAD)
+                               LOAD&RETURN s5, "3"                    ; 7A 3(KEYPAD PdDn)
+                               LOAD&RETURN s5, "-"                    ; 7B -(KEYPAD)
+                               LOAD&RETURN s5, "*"                    ; 7C *(KEYPAD)
+                               LOAD&RETURN s5, "9"                    ; 7D 9(KEYPAD PgUp)
+                               CONSTANT LAST_SCAN_CODE, 7E
+                               ;LOAD&RETURN s5,00 ; 7E SCROLL LOCK
+                               ;LOAD&RETURN s5,00 ; 7F
+                               ;LOAD&RETURN s5,00 ; 80
+                               ;LOAD&RETURN s5,00 ; 81
+                               ;LOAD&RETURN s5,00 ; 82
+                               ;LOAD&RETURN s5,DC ; 83 F7 (97)
+                               ; end of program
+                               CONSTANT UART_status_port, 00          ; Read status
+                               CONSTANT UART_Tx_full, 00000100'b      ; full - bit2
+                               CONSTANT UART_TX6_output_port, 01
+                               CONSTANT reset_UART_port, 01
+                               CONSTANT UART_reset, 00000011'b        ; reset Tx and Rx
+                               CONSTANT UART_operate, 00000000'b      ; Tx and Rx free to operate
+            reset_UART_macros: 
+                               OUTPUTK UART_reset, reset_UART_port
+                               OUTPUTK UART_operate, reset_UART_port
+                               RETURN 
+                      UART_TX: 
+                               INPUT s0, UART_status_port             ;Check if buffer is full
+                               TEST s0, UART_Tx_full
+                               JUMP NZ, UART_TX                       ;wait if full
+                               OUTPUT s5, UART_TX6_output_port
+                               RETURN 

@@ -1,0 +1,6 @@
+
+Digilent FT2232H USB ID:
+
+VID 0403
+PID 6010
+
