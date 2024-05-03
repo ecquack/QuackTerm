@@ -266,7 +266,8 @@ ESC [ n D	move left n characters.
 ESC [ y ; x f	alias for ESC [ y; x H (absolute cursor position)
 ESC [ G		delete the current line and move subsequent lines up
 ESC [ H		move cursor to upper left corner (home)
-ESC [ y ; x H	absolute cursor position to row y column x where x and y are decimal numbers with 			the origin at 1,1 (not 0,0). 
+ESC [ y ; x H	absolute cursor position to row y column x where x and y
+                are decimal numbers with the origin at 1,1 (not 0,0). 
 ESC [ I		move right one tab stop
 ESC [ n I		move right n tab stops (8 spaces per tab fixed)
 ESC [  J		clear from current position to end of screen
